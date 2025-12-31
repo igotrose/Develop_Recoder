@@ -1,0 +1,79 @@
+#!/bin/bash 
+
+### BEGIN INIT INFO
+# Provides:          quectel-setup
+# Required-Start:    $local_fs $network
+# Required-Stop:     $local_fs
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Setup Quectel 4/5G module
+# Description:       Send AT commands to initialize Quectel 4/5G module
+### END INIT INFO
+
+DEVICE="/dev/ttyUSB2"
+BAUDRATE=115200
+TIMEOUT=30
+
+log() {
+    echo "$(date): $1" >> /var/log/quectel-setup.log
+}
+
+wait_for_device() {
+    log "Waiting for device $DEVICE to be ready..."
+    local counter=0
+
+    while [ ! -c "$DEVICE"] && [ $counter -lt $TIMEOUT ]; do
+        sleep 1
+        counter=$((counter+1))
+    done
+
+    if [ ! -c "$DEVICE" ]; then
+        log "ERROR: Device $DEVICE not found after ${TINMEOUT} seconds}"
+        return 1
+    fi
+
+    log "Device $DEVICE not ready"
+    return 0
+}
+
+setup_module() { 
+    log "Setting up Quectel module..."
+
+    exec 3<> $DEVICE
+
+    echo -e "AT+CFUN=0\r" >&3
+    sleep 1
+    
+    echo -e "AT+CFUN=1\r" >&3
+    sleep 2
+    
+    echo -e "AT+CPIN?\r" >&3
+    sleep 1
+    
+    echo -e "AT+CSQ\r" >&3
+    sleep 1
+    
+    echo -e "AT+COPS?\r" >&3
+    sleep 1
+    
+    exec 3<&-
+    exec 3>&-
+    
+    log "Quectel module setup completed"
+}
+
+case "$1" in
+    start)
+        wait_for_device || setup_module
+        ;;
+    stop)
+        log "Quectel module setup script stopped"
+        ;;
+    restart|reload)
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart}"
+        exit 1
+esac
+
+exit 0

@@ -1,0 +1,15 @@
+[Unit]
+Description=First Boot Init: Resize root + Mount data partition
+After=systemd-remount-fs.service
+Before=systemd-sysusers.service
+ConditionPathExists=!/root/.firstboot_done
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/firstboot-init.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
