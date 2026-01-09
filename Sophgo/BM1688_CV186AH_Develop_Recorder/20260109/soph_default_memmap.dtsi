@@ -1,0 +1,68 @@
+/ {
+	// 声明DRAM的映射区间
+	memory@100000000 {
+		device_type = "memory";
+		reg = <0x1 0x00000000 0x2 0x00000000>;	//8G
+		// 起始地址：0x1_0000_0000 即4G
+		// 大小：0x2_0000_0000 即8G
+		// 结束地址： 0x1_0000_0000 + 0x2_0000_0000 = 0x3_0000_0000 即12G
+	};
+	// 保留区的内存从8G里分配
+	reserved-memory {
+		#address-cells = <0x2>;
+		// 地址用2个32bit表示，64位地址
+		#size-cells = <0x2>;
+		// 大小用2个32bit表示，64位大小
+		// reg = <addr_hi addr_lo size_hi size_lo>;
+		ranges;
+		// 这些保留区仅对 Linux 生效
+#ifndef __UBOOT__
+		//reserved for ddr resume bist
+		// DDR resume/BIST 的小保留块
+		ddr_bist_mem: ddr_bist_mem {
+			alloc-ranges = <0x1 0x000F0000 0 0x10000>;
+			size = <0x0 0x10000>;
+			no-map;
+		};
+		// 地址范围：0x1_000F_0000 - 0x1_0010_0000 即64KB
+		// no-map 表示该内存区域不会被 Linux 内核使用或映射
+
+		// 显示启动logo缓冲
+		vo_logo: vo_logo {
+			alloc-ranges = <0x1 0x2E00000 0 0x200000>; // 2M, for vo logo
+			size = <0x0 0x200000>;
+		};
+		// 地址范围：0x1_02E0_0000 - 0x1_0300_0000 即2MB
+
+		//Don't move the TPU address
+		scalar_reserved: scalar_mem {
+			reg = <0x1 0x04000000 0x0 0x10000000>;	//256MB for TPU firmware
+			no-map;
+		};
+		// 地址范围：0x1_0400_0000 - 0x1_2400_0000 即256MB
+
+		cma_reserved: linux,cma {
+			compatible = "shared-dma-pool";
+			reusable; // 平时可以借给系统，当系统需要连续内存时后可以回收
+			size = <0x0 0x8000000>; // 128m for drm
+			alloc-ranges = <0x1 0x40000000 0x0 0x8000000>;   // to fix hdmi audio bug
+			alignment = <0x0 0x100000>; // 1MB
+			linux,cma-default;	// 系统默认的CMA区域
+		};
+		// 地址范围：0x1_4000_0000 - 0x1_4800_0000 即128MB
+
+		//0x1_8000_0000 - 0x2_0000_0000 for TPU (owner: zhuolin.li@sophgo.com)
+		// NPU/TPU的ION区域
+		ion_for_npu: ion_npu_mem {
+			compatible = "npu-region";
+			reg = <0x1 0x7A000000 0x0 0x60000000>; // 1.5G, for TPU
+		};
+		// 地址范围：0x1_7A00_0000 - 0x0_6000_0000 即1.5G
+
+		ion_for_vpp: ion_vpp_mem {
+			compatible = "vpp-region";
+			reg = <0x2 0x00400000 0x0 0xFFC00000>; // 4G, for VPP
+		};
+#endif
+	};
+};

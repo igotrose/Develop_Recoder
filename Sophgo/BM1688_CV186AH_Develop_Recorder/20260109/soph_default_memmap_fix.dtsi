@@ -1,0 +1,76 @@
+/ {
+	/*
+	 * DRAM: base = 0x1_0000_0000 (4GB), size = 0x2_0000_0000 (8GB)
+	 * Range: [0x1_0000_0000, 0x3_0000_0000)
+	 */
+	memory@100000000 {
+		device_type = "memory";
+		reg = <0x1 0x00000000 0x2 0x00000000>;	/* 8GB */
+	};
+
+	reserved-memory {
+		#address-cells = <0x2>;
+		#size-cells = <0x2>;
+		ranges;
+
+#ifndef __UBOOT__
+		/* reserved for ddr resume bist */
+		ddr_bist_mem: ddr_bist_mem {
+			alloc-ranges = <0x1 0x000F0000 0x0 0x00010000>;
+			size = <0x0 0x00010000>;	/* 64KB */
+			no-map;
+		};
+
+		/* 0x1_02E0_0000 - 0x1_0300_0000 : 2MB for VO logo */
+		vo_logo: vo_logo {
+			alloc-ranges = <0x1 0x02E00000 0x0 0x00200000>;
+			size = <0x0 0x00200000>;	/* 2MB */
+			/* no 'no-map' -> mapped but reserved */
+		};
+
+		/*
+		 * TPU firmware (do NOT move if firmware/driver assumes fixed addr)
+		 * 0x1_0400_0000 - 0x1_1400_0000 : 256MB
+		 */
+		scalar_reserved: scalar_mem {
+			reg = <0x1 0x04000000 0x0 0x10000000>;	/* 256MB */
+			no-map;
+		};
+
+		/*
+		 * Default CMA pool for DRM/HDMI/etc (keep as-is unless you know impacts)
+		 * 0x1_4000_0000 - 0x1_4800_0000 : 128MB
+		 */
+		cma_reserved: linux,cma {
+			compatible = "shared-dma-pool";
+			reusable;
+			size = <0x0 0x08000000>;		/* 128MB */
+			alloc-ranges = <0x1 0x40000000 0x0 0x08000000>; /* fix hdmi audio bug */
+			alignment = <0x0 0x00100000>;		/* 1MB */
+			linux,cma-default;
+		};
+
+		/*
+		 * ION/NPU heap (reduced)
+		 * BEFORE: 0x60000000 (1.5GB) -> [0x1_7A000000, 0x1_DA000000)
+		 * AFTER : 0x40000000 (1.0GB) -> [0x1_7A000000, 0x1_BA000000)
+		 */
+		ion_for_npu: ion_npu_mem {
+			compatible = "npu-region";
+			reg = <0x1 0x7A000000 0x0 0x40000000>;	/* 1GB for NPU/TPU */
+		};
+
+		/*
+		 * ION/VPP heap (reduced)
+		 * BEFORE: 0xFFC00000 (~4GB-4MB) -> [0x2_00400000, 0x3_00000000)
+		 * AFTER : 0x40000000 (1.0GB)    -> [0x2_00400000, 0x2_40400000)
+		 *
+		 * Keep 0x00400000 offset as original to minimize platform-specific risk.
+		 */
+		ion_for_vpp: ion_vpp_mem {
+			compatible = "vpp-region";
+			reg = <0x2 0x00400000 0x0 0x40000000>;	/* 1GB for VPP */
+		};
+#endif /* __UBOOT__ */
+	};
+};
