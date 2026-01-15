@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#打印
+# 打印
 function print_notice()
 {
   printf "\e[1;34;47m %s \e[0m\n" "$1"
@@ -9,16 +9,16 @@ function print_notice()
 function print_usage()
 {
   printf "========>correct usage :\n"
-  printf "./test.sh init \n"
-  printf "./test.sh relay on|off \n"
-  printf "./test.sh 485 send [data] \n"
-  printf "./test.sh 485 recv \n"
-  printf "./test.sh 232 test \n"
-  printf "./test.sh gpio get \n"
-  printf "./test.sh gpio set OUT0|OUT1 0|1 \n"
+  printf "./test_zx.sh init \n"
+  printf "./test_zx.sh relay on|off \n"
+  printf "./test_zx.sh 485 send [data] \n"
+  printf "./test_zx.sh 485 recv \n"
+  printf "./test_zx.sh 232 test \n"
+  printf "./test_zx.sh gpio get \n"
+  printf "./test_zx.sh gpio set OUT0|OUT1 0|1 \n"
 }
 
-#初始化函数
+# 初始化函数
 function init_485() {
     cvi_pinmux -w UART1_TX/UART1_TX
     cvi_pinmux -w UART1_RX/UART1_RX
@@ -81,7 +81,7 @@ function init() {
     print_notice "Initialization complete."
 }
 
-#功能函数
+# 功能函数
 function relay_on() {
     echo 1 > /sys/class/gpio/gpio355/value
 }
@@ -165,7 +165,7 @@ function gpio_set(){
 }
 
 function main() {
-    // 检查是否至少有一个参数传入，$# 表示参数个数
+    # 检查是否至少有一个参数传入，$# 表示参数个数
     if [ $# -gt 0 ] ; then
       operation="$1"
       shift
@@ -230,5 +230,5 @@ function main() {
     exit 0
 }
 
-// 启动主函数，传递所有参数
+# 启动主函数，传递所有参数
 main "$@"
