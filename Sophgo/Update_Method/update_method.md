@@ -41,6 +41,8 @@ SDCard 升级需要将SD卡格式化为`FAT32`格式，大小1GB以上，刷机�
         ```bash
         setenv serverip 192.168.5.223
         dhcp
+        # 一定要测试网络联通性
+        ping ${serverip}
         tftp ${scriptaddr}  boot.scr
         source ${scriptaddr} 
         ```
