@@ -70,11 +70,18 @@ SDCard 升级需要将SD卡格式化为`FAT32`格式，大小1GB以上，刷机�
     ```
 
 ### 更新kernel
+#### BM1688
 - 拉取编译更新之后的`boot.itb`替换原有的`/boot/boot.itb`
     ```bash
     # 拉取方式任意
     scp ubuntu@192.168.5.223:/home/ubuntu/workspace/Sophgo/bm1688/BM1688_EDGEs_v2_1/ramdisk/build/edge_wevb_emmc/workspace/boot.itb /boot/boot.itb
     scp lzx@192.168.5.223:/home/lzx/work/SOPHGO/BM1688/v1_9/1688_v1.9_source/ramdisk/build/edge_wevb_emmc/workspace/boot.itb /boot/boot.itb
+    ```
+#### BM1684X
+- 拉取编译更新之后的`emmcboot.itb`替换原有的`/boot/emmcboot.itb`
+    ```bash 
+    # 拉取方式任意
+    scp ubuntu@192.168.5.223:/data/users/ubuntu/workspace/Sophgo/bm1684/bm1684x_v23_09/neutral_version/install/soc_bm1684/emmcboot.itb /boot/emmcboot.itb
     ```
 - 重启
 ### uboot 更换DTS
