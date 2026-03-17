@@ -1,0 +1,67 @@
+From eed00e1725d05951d2504625526caebe9a5f0919 Mon Sep 17 00:00:00 2001
+From: qiupeiqin <qiupeiqin@cs-t.cn>
+Date: Tue, 17 Mar 2026 10:59:31 +0800
+Subject: [PATCH] Add judgment for the main control model and modify the
+ corresponding image format
+
+---
+ SophUI/mainwindow.cpp | 18 ++++++++++++++++++
+ SophUI/mainwindow.ui  |  5 +++--
+ 2 files changed, 21 insertions(+), 2 deletions(-)
+
+diff --git a/SophUI/mainwindow.cpp b/SophUI/mainwindow.cpp
+index 288f2d9..fcc1964 100644
+--- a/SophUI/mainwindow.cpp
++++ b/SophUI/mainwindow.cpp
+@@ -2,6 +2,11 @@
+ #include "ui_mainwindow.h"
+ #include "qtermwidget.h"
+ 
++#include <QImage>
++#include <QPixmap>
++#include <QPalette>
++#include <QBrush>
++
+ #define GET_BASH_INFO_ASYNC 0
+ 
+ template <typename T>
+@@ -74,6 +79,19 @@ MainWindow::MainWindow(QWidget *parent)
+ {
+ 
+     ui->setupUi(this);
++    // 动态获取背景图，如果是 bm1684x，则将图片进行 rgb 交换，否则会出现颜色异常
++    QString cpuModel = executeLinuxCmd("awk -F': ' '/model name/{print $2; exit}' /proc/cpuinfo").trimmed();
++    QImage bg(":/new/prefix1/bg.png");
++    if (cpuModel == "bm1684x" || cpuModel == "bm1684")
++    {
++        bg = bg.rgbSwapped();
++    }
++
++    QPalette pal = this->palette();
++    pal.setBrush(QPalette::Window, QBrush(QPixmap::fromImage(bg)));
++    this->setAutoFillBackground(true);
++    this->setPalette(pal);
++
+     env = QProcessEnvironment::systemEnvironment();
+     QString sophonBgPath = env.value("SOPHON_QT_BG_PATH");
+     if(!sophonBgPath.isEmpty())
+diff --git a/SophUI/mainwindow.ui b/SophUI/mainwindow.ui
+index 8650714..1b99b34 100644
+--- a/SophUI/mainwindow.ui
++++ b/SophUI/mainwindow.ui
+@@ -14,9 +14,10 @@
+    <string>SophUI</string>
+   </property>
+   <property name="styleSheet">
+-   <string notr="true">#MainWindow{
++  <!-- 静态获取背景图方式 -->
++   <!-- <string notr="true">#MainWindow{
+ border-image: url(:/new/prefix1/bg.png);
+-}</string>
++}</string> -->
+   </property>
+   <widget class="QWidget" name="centralwidget">
+    <property name="styleSheet">
+-- 
+2.34.1
+
