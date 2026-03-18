@@ -1,0 +1,138 @@
+From 49d963760faacbb4dacaf3c400b31989e43a204f Mon Sep 17 00:00:00 2001
+From: Qiu Peiqin <qiupeiqin@cs-t.cn>
+Date: Fri, 6 Mar 2026 17:05:00 +0800
+Subject: [PATCH] Increase the font size
+
+---
+ base/core/res/res/values/dimens.xml                    |  8 ++++----
+ base/data/fonts/fonts.xml                              |  7 +++----
+ base/packages/SettingsProvider/res/values/defaults.xml |  2 +-
+ .../com/android/providers/settings/DatabaseHelper.java |  2 +-
+ base/packages/SystemUI/res/values/dimens.xml           | 10 +++++-----
+ 5 files changed, 14 insertions(+), 15 deletions(-)
+
+diff --git a/base/core/res/res/values/dimens.xml b/base/core/res/res/values/dimens.xml
+index d165930d3..531cbf6b1 100755
+--- a/base/core/res/res/values/dimens.xml
++++ b/base/core/res/res/values/dimens.xml
+@@ -35,7 +35,7 @@
+     <dimen name="status_bar_height">@dimen/status_bar_height_portrait</dimen>
+     <!-- Height of the status bar in portrait. The height should be
+          Max((status bar content height + waterfall top size), top cutout size) -->
+-    <dimen name="status_bar_height_portrait">24dp</dimen>
++    <dimen name="status_bar_height_portrait">28dp</dimen>
+     <!-- Height of the status bar in landscape. The height should be
+          Max((status bar content height + waterfall top size), top cutout size) -->
+     <dimen name="status_bar_height_landscape">@dimen/status_bar_height_portrait</dimen>
+@@ -74,12 +74,12 @@
+     <!-- Width of the navigation bar when it is placed vertically on the screen in car mode -->
+     <dimen name="navigation_bar_width_car_mode">96dp</dimen>
+     <!-- Height of notification icons in the status bar -->
+-    <dimen name="status_bar_icon_size">22dip</dimen>
++    <dimen name="status_bar_icon_size">28dip</dimen>
+     <!-- Desired size of system icons in status bar. -->
+-    <dimen name="status_bar_system_icon_size">15dp</dimen>
++    <dimen name="status_bar_system_icon_size">21dp</dimen>
+     <!-- Intrinsic size of most system icons in status bar. This is the default value that
+          is used if a Drawable reports an intrinsic size of 0. -->
+-    <dimen name="status_bar_system_icon_intrinsic_size">17dp</dimen>
++    <dimen name="status_bar_system_icon_intrinsic_size">21dp</dimen>
+     <!-- Size of the giant number (unread count) in the notifications -->
+     <dimen name="status_bar_content_number_size">48sp</dimen>
+     <!-- Margin at the edge of the screen to ignore touch events for in the windowshade. -->
+diff --git a/base/data/fonts/fonts.xml b/base/data/fonts/fonts.xml
+index f629cecb5..6a54d0c03 100755
+--- a/base/data/fonts/fonts.xml
++++ b/base/data/fonts/fonts.xml
+@@ -22,8 +22,7 @@
+ <familyset version="23">
+     <!-- first font is default -->
+     <family name="sans-serif">
+-        <font weight="900" style="normal">Roboto-Black.ttf</font>
+-        <font weight="900" style="italic">Roboto-BlackItalic.ttf</font>
++
+         <font weight="100" style="normal">Roboto-Thin.ttf</font>
+         <font weight="100" style="italic">Roboto-ThinItalic.ttf</font>
+         <font weight="300" style="normal">Roboto-Light.ttf</font>
+@@ -32,10 +31,10 @@
+         <font weight="400" style="italic">Roboto-Italic.ttf</font>
+         <font weight="500" style="normal">Roboto-Medium.ttf</font>
+         <font weight="500" style="italic">Roboto-MediumItalic.ttf</font>
+-        <!-- <font weight="900" style="normal">Roboto-Black.ttf</font>
+-        <font weight="900" style="italic">Roboto-BlackItalic.ttf</font> -->
+         <font weight="700" style="normal">Roboto-Bold.ttf</font>
+         <font weight="700" style="italic">Roboto-BoldItalic.ttf</font>
++        <font weight="900" style="normal">Roboto-Black.ttf</font>
++        <font weight="900" style="italic">Roboto-BlackItalic.ttf</font>
+     </family>
+ 
+     <!-- Note that aliases must come after the fonts they reference. -->
+diff --git a/base/packages/SettingsProvider/res/values/defaults.xml b/base/packages/SettingsProvider/res/values/defaults.xml
+index e19b5cc2e..50204a31d 100755
+--- a/base/packages/SettingsProvider/res/values/defaults.xml
++++ b/base/packages/SettingsProvider/res/values/defaults.xml
+@@ -17,7 +17,7 @@
+  */
+ -->
+ <resources>
+-    <fraction name="def_font_size_scale">130%</fraction>
++    <fraction name="def_font_size_scale">220%</fraction>
+     <string name="def_input_method" translatable="false">com.iflytek.inputmethod.wear.xiaomi/com.iflytek.inputmethod.wear.FlyIME</string>
+     <bool name="def_dim_screen">true</bool>
+     <integer name="def_screen_off_timeout">60000</integer>
+diff --git a/base/packages/SettingsProvider/src/com/android/providers/settings/DatabaseHelper.java b/base/packages/SettingsProvider/src/com/android/providers/settings/DatabaseHelper.java
+index 832d019a9..673707577 100755
+--- a/base/packages/SettingsProvider/src/com/android/providers/settings/DatabaseHelper.java
++++ b/base/packages/SettingsProvider/src/com/android/providers/settings/DatabaseHelper.java
+@@ -2245,7 +2245,7 @@ class DatabaseHelper extends SQLiteOpenHelper {
+                     R.integer.def_screen_off_timeout);
+ 
+             // default font by qhj
+-            //loadFractionSetting(stmt, Settings.System.FONT_SCALE,R.fraction.def_font_size_scale, 1);
++            loadFractionSetting(stmt, Settings.System.FONT_SCALE,R.fraction.def_font_size_scale, 1);
+             // Set default cdma DTMF type
+             loadSetting(stmt, Settings.System.DTMF_TONE_TYPE_WHEN_DIALING, 0);
+ 
+diff --git a/base/packages/SystemUI/res/values/dimens.xml b/base/packages/SystemUI/res/values/dimens.xml
+index f002a271a..23ee2be35 100755
+--- a/base/packages/SystemUI/res/values/dimens.xml
++++ b/base/packages/SystemUI/res/values/dimens.xml
+@@ -69,14 +69,14 @@
+     <dimen name="status_bar_horizontal_padding">2.5dp</dimen>
+ 
+     <!-- Height of the battery icon in the status bar. -->
+-    <dimen name="status_bar_battery_icon_height">13.0dp</dimen>
++    <dimen name="status_bar_battery_icon_height">21dp</dimen>
+ 
+     <!-- Width of the battery icon in the status bar. The battery drawable assumes a 12x20 canvas,
+     so the width of the icon should be 13.0dp * (12.0 / 20.0) -->
+-    <dimen name="status_bar_battery_icon_width">7.8dp</dimen>
++    <dimen name="status_bar_battery_icon_width">12.6dp</dimen>
+ 
+     <!-- The font size for the clock in the status bar. -->
+-    <dimen name="status_bar_clock_size">14sp</dimen>
++    <dimen name="status_bar_clock_size">13sp</dimen>
+ 
+     <!-- The starting padding for the clock in the status bar. -->
+     <dimen name="status_bar_clock_starting_padding">7dp</dimen>
+@@ -103,7 +103,7 @@
+     <dimen name="status_bar_system_icon_spacing">0dp</dimen>
+ 
+     <!-- The amount to scale each of the status bar icons by. A value of 1 means no scaling. -->
+-    <item name="status_bar_icon_scale_factor" format="float" type="dimen">1.0</item>
++    <item name="status_bar_icon_scale_factor" format="float" type="dimen">1.2</item>
+ 
+     <dimen name="group_overflow_number_size">@*android:dimen/notification_text_size</dimen>
+     <dimen name="group_overflow_number_padding">@*android:dimen/notification_content_margin_end
+@@ -269,7 +269,7 @@
+     <dimen name="snooze_option_padding">8dp</dimen>
+ 
+     <!-- size at which Notification icons will be drawn in the status bar -->
+-    <dimen name="status_bar_icon_drawing_size">15dp</dimen>
++    <dimen name="status_bar_icon_drawing_size">21dp</dimen>
+ 
+     <!-- size at which Notification icons will be drawn on Ambient Display -->
+     <dimen name="status_bar_icon_drawing_size_dark">
+-- 
+2.34.1
+

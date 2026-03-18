@@ -1,0 +1,643 @@
+From 98c84de1b491e03a54a6c1dd7e49f988b6f00c66 Mon Sep 17 00:00:00 2001
+From: Qiu Peiqin <qiupeiqin@cs-t.cn>
+Date: Thu, 5 Mar 2026 16:05:41 +0800
+Subject: [PATCH] Battery Optimization
+
+---
+ base/data/fonts/fonts.xml                     |   6 +-
+ base/packages/SystemUI/AndroidManifest.xml    |   1 +
+ .../SystemUI/res/values-zh-rCN/strings.xml    |   5 +
+ base/packages/SystemUI/res/values/strings.xml |   5 +
+ .../power/PowerNotificationWarnings.java      |  89 ++++++++++++-
+ .../com/android/systemui/power/PowerUI.java   |  78 ++++++++++-
+ .../com/android/server/BatteryService.java    | 123 +++++++++++++-----
+ 7 files changed, 267 insertions(+), 40 deletions(-)
+
+diff --git a/base/data/fonts/fonts.xml b/base/data/fonts/fonts.xml
+index 4c214b529..f629cecb5 100755
+--- a/base/data/fonts/fonts.xml
++++ b/base/data/fonts/fonts.xml
+@@ -22,6 +22,8 @@
+ <familyset version="23">
+     <!-- first font is default -->
+     <family name="sans-serif">
++        <font weight="900" style="normal">Roboto-Black.ttf</font>
++        <font weight="900" style="italic">Roboto-BlackItalic.ttf</font>
+         <font weight="100" style="normal">Roboto-Thin.ttf</font>
+         <font weight="100" style="italic">Roboto-ThinItalic.ttf</font>
+         <font weight="300" style="normal">Roboto-Light.ttf</font>
+@@ -30,8 +32,8 @@
+         <font weight="400" style="italic">Roboto-Italic.ttf</font>
+         <font weight="500" style="normal">Roboto-Medium.ttf</font>
+         <font weight="500" style="italic">Roboto-MediumItalic.ttf</font>
+-        <font weight="900" style="normal">Roboto-Black.ttf</font>
+-        <font weight="900" style="italic">Roboto-BlackItalic.ttf</font>
++        <!-- <font weight="900" style="normal">Roboto-Black.ttf</font>
++        <font weight="900" style="italic">Roboto-BlackItalic.ttf</font> -->
+         <font weight="700" style="normal">Roboto-Bold.ttf</font>
+         <font weight="700" style="italic">Roboto-BoldItalic.ttf</font>
+     </family>
+diff --git a/base/packages/SystemUI/AndroidManifest.xml b/base/packages/SystemUI/AndroidManifest.xml
+index 17f92ee86..77b09a66a 100755
+--- a/base/packages/SystemUI/AndroidManifest.xml
++++ b/base/packages/SystemUI/AndroidManifest.xml
+@@ -83,6 +83,7 @@
+     <uses-permission android:name="android.permission.MANAGE_USB" />
+     <uses-permission android:name="android.permission.CONTROL_DISPLAY_BRIGHTNESS" />
+     <uses-permission android:name="android.permission.DEVICE_POWER" />
++    <uses-permission android:name="android.permission.REBOOT" />
+     <uses-permission android:name="android.permission.MOUNT_UNMOUNT_FILESYSTEMS" />
+     <uses-permission android:name="android.permission.MASTER_CLEAR" />
+     <uses-permission android:name="android.permission.VIBRATE" />
+diff --git a/base/packages/SystemUI/res/values-zh-rCN/strings.xml b/base/packages/SystemUI/res/values-zh-rCN/strings.xml
+index 376d92fae..e63cc3cf9 100755
+--- a/base/packages/SystemUI/res/values-zh-rCN/strings.xml
++++ b/base/packages/SystemUI/res/values-zh-rCN/strings.xml
+@@ -29,6 +29,11 @@
+     <string name="battery_low_percent_format_hybrid" msgid="3985614339605686167">"剩余电量：<xliff:g id="PERCENTAGE">%1$s</xliff:g>；根据您的使用情况，大约还可使用 <xliff:g id="TIME">%2$s</xliff:g>"</string>
+     <string name="battery_low_percent_format_hybrid_short" msgid="5917433188456218857">"剩余电量：<xliff:g id="PERCENTAGE">%1$s</xliff:g>；大约还可使用 <xliff:g id="TIME">%2$s</xliff:g>"</string>
+     <string name="battery_low_percent_format_saver_started" msgid="4968468824040940688">"剩余 <xliff:g id="PERCENTAGE">%s</xliff:g>。省电模式已开启。"</string>
++    <!-- 低电关机提示 -->
++    <string name="battery_shutdown_soon_text">"电量过低，将在30秒后自动关机"</string>
++    <string name="inactivity_shutdown_title">"检测到长时间无操作"</string>
++    <string name="inactivity_shutdown_dialog_message">"已连续15分钟无操作，设备将在<xliff:g id="SECONDS">%1$d</xliff:g>秒后自动关机。"</string>
++    <string name="inactivity_shutdown_now">"立即关机"</string>
+     <string name="invalid_charger" msgid="4370074072117767416">"无法通过 USB 充电。请使用设备随附的充电器。"</string>
+     <string name="invalid_charger_title" msgid="938685362320735167">"无法通过 USB 充电"</string>
+     <string name="invalid_charger_text" msgid="2339310107232691577">"使用设备随附的充电器"</string>
+diff --git a/base/packages/SystemUI/res/values/strings.xml b/base/packages/SystemUI/res/values/strings.xml
+index 174f5c737..01db35aca 100755
+--- a/base/packages/SystemUI/res/values/strings.xml
++++ b/base/packages/SystemUI/res/values/strings.xml
+@@ -59,6 +59,11 @@
+ 
+     <!-- Same as battery_low_percent_format, with a notice about battery saver if on. [CHAR LIMIT=none]-->
+     <string name="battery_low_percent_format_saver_started"><xliff:g id="percentage">%s</xliff:g> remaining. Battery Saver is on.</string>
++    <!-- criticailly low power to shutdown -->
++    <string name="battery_shutdown_soon_text">Battery is critically low. Device will shut down in 30 seconds.</string>
++    <string name="inactivity_shutdown_title">No operation detected</string>
++    <string name="inactivity_shutdown_dialog_message">No operation for 15 minutes. Device will shut down in %1$d seconds.</string>
++    <string name="inactivity_shutdown_now">Shut down now</string>
+ 
+     <!-- A message that appears when a USB charger is plugged in and the device does not
+     support charging on it.  That is, a charger that fits into the USB port and goes into
+diff --git a/base/packages/SystemUI/src/com/android/systemui/power/PowerNotificationWarnings.java b/base/packages/SystemUI/src/com/android/systemui/power/PowerNotificationWarnings.java
+index 6abbbbeaa..09465d27a 100755
+--- a/base/packages/SystemUI/src/com/android/systemui/power/PowerNotificationWarnings.java
++++ b/base/packages/SystemUI/src/com/android/systemui/power/PowerNotificationWarnings.java
+@@ -79,6 +79,8 @@ public class PowerNotificationWarnings implements PowerUI.WarningsUI {
+ 
+     private static final String TAG = PowerUI.TAG + ".Notification";
+     private static final boolean DEBUG = PowerUI.DEBUG;
++    // shutdown soon display battery level
++    private static final int SHUTDOWN_SOON_LEVEL = 10;
+ T
+     private static final String TAG_BATTERY = "low_battery";
+     private static final String TAG_TEMPERATURE = "high_temp";
+@@ -154,8 +156,26 @@ public class PowerNotificationWarnings implements PowerUI.WarningsUI {
+     private SystemUIDialog mHighTempDialog;
+     private SystemUIDialog mThermalShutdownDialog;
+     @VisibleForTesting SystemUIDialog mUsbHighTempDialog;
++    private SystemUIDialog mInactivityShutdownDialog;
++    private int mInactivityShutdownSecondsLeft;
+     private BatteryStateSnapshot mCurrentBatterySnapshot;
+     private ActivityStarter mActivityStarter;
++    private final Runnable mInactivityShutdownTick = new Runnable() {
++        @Override
++        public void run() {
++            mInactivityShutdownSecondsLeft--;
++            if (mInactivityShutdownSecondsLeft <= 0) {
++                shutdownByInactivity();
++                return;
++            }
++            if (mInactivityShutdownDialog != null) {
++                mInactivityShutdownDialog.setMessage(
++                        mContext.getString(R.string.inactivity_shutdown_dialog_message,
++                                mInactivityShutdownSecondsLeft));
++            }
++            mHandler.postDelayed(this, 1000);
++        }
++    };
+ 
+     /**
+      */
+@@ -183,6 +203,8 @@ public class PowerNotificationWarnings implements PowerUI.WarningsUI {
+         pw.println(mThermalShutdownDialog != null ? "not null" : null);
+         pw.print("mUsbHighTempDialog=");
+         pw.println(mUsbHighTempDialog != null ? "not null" : null);
++        pw.print("mInactivityShutdownDialog=");
++        pw.println(mInactivityShutdownDialog != null ? "not null" : null);
+     }
+ 
+     private int getLowBatteryAutoTriggerDefaultLevel() {
+@@ -251,6 +273,9 @@ public class PowerNotificationWarnings implements PowerUI.WarningsUI {
+         mNoMan.notifyAsUser(TAG_BATTERY, SystemMessage.NOTE_BAD_CHARGER, n, UserHandle.ALL);
+     }
+ 
++    /**
++     * Shows a low battery warning notification.
++     */
+     protected void showWarningNotification() {
+         final String percentage = NumberFormat.getPercentInstance()
+                 .format((double) mCurrentBatterySnapshot.getBatteryLevel() / 100.0);
+@@ -265,6 +290,10 @@ public class PowerNotificationWarnings implements PowerUI.WarningsUI {
+         } else {
+             contentText = mContext.getString(R.string.battery_low_percent_format, percentage);
+         }
++        // if battery level is critically low , show shutdown soon notification
++        if (mCurrentBatterySnapshot.getBatteryLevel() <= SHUTDOWN_SOON_LEVEL) {
++            contentText = mContext.getString(R.string.battery_shutdown_soon_text);
++        }
+ 
+         final Notification.Builder nb =
+                 new Notification.Builder(mContext, NotificationChannels.BATTERY)
+@@ -274,7 +303,7 @@ public class PowerNotificationWarnings implements PowerUI.WarningsUI {
+                         .setShowWhen(false)
+                         .setContentText(contentText)
+                         .setContentTitle(title)
+-                        .setOnlyAlertOnce(true)
++                        .setOnlyAlertOnce(!mPlaySound)
+                         .setDeleteIntent(pendingBroadcast(ACTION_DISMISSED_WARNING))
+                         .setStyle(new Notification.BigTextStyle().bigText(contentText))
+                         .setVisibility(Notification.VISIBILITY_PUBLIC);
+@@ -484,6 +513,64 @@ public class PowerNotificationWarnings implements PowerUI.WarningsUI {
+                 TAG_TEMPERATURE, SystemMessage.NOTE_THERMAL_SHUTDOWN, n, UserHandle.ALL);
+     }
+ 
++    @Override
++    public void showInactivityShutdownWarning(int countdownSeconds) {
++        mHandler.post(() -> showInactivityShutdownWarningInternal(countdownSeconds));
++    }
++
++    @Override
++    public void dismissInactivityShutdownWarning() {
++        mHandler.post(this::dismissInactivityShutdownWarningInternal);
++    }
++
++    private void showInactivityShutdownWarningInternal(int countdownSeconds) {
++        Slog.i(TAG, "show inactivity shutdown warning, countdownSeconds=" + countdownSeconds);
++        if (countdownSeconds <= 0) {
++            shutdownByInactivity();
++            return;
++        }
++        dismissInactivityShutdownWarningInternal();
++        mInactivityShutdownSecondsLeft = countdownSeconds;
++
++        final SystemUIDialog d = new SystemUIDialog(mContext, R.style.Theme_SystemUI_Dialog_Alert);
++        d.setCancelable(false);
++        d.setShowForAllUsers(true);
++        d.setTitle(R.string.inactivity_shutdown_title);
++        d.setMessage(mContext.getString(R.string.inactivity_shutdown_dialog_message,
++                mInactivityShutdownSecondsLeft));
++        d.setPositiveButton(R.string.inactivity_shutdown_now,
++                (dialog, which) -> shutdownByInactivity());
++        d.setNegativeButton(android.R.string.cancel,
++                (dialog, which) -> dismissInactivityShutdownWarningInternal());
++        d.setOnDismissListener(dialog -> {
++            Slog.i(TAG, "inactivity shutdown dialog dismissed");
++            mInactivityShutdownDialog = null;
++        });
++        d.getWindow().addFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
++                | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
++        d.show();
++        mInactivityShutdownDialog = d;
++        mHandler.postDelayed(mInactivityShutdownTick, 1000);
++    }
++
++    private void dismissInactivityShutdownWarningInternal() {
++        mHandler.removeCallbacks(mInactivityShutdownTick);
++        if (mInactivityShutdownDialog != null) {
++            mInactivityShutdownDialog.dismiss();
++            mInactivityShutdownDialog = null;
++        }
++    }
++
++    private void shutdownByInactivity() {
++        Slog.i(TAG, "shutdown by inactivity timeout");
++        dismissInactivityShutdownWarningInternal();
++        try {
++            mPowerMan.shutdown(false, "inactivity_timeout", false);
++        } catch (Exception e) {
++            Slog.e(TAG, "Failed to shutdown by inactivity timeout", e);
++        }
++    }
++
+     @Override
+     public void showUsbHighTemperatureAlarm() {
+         mHandler.post(() -> showUsbHighTemperatureAlarmInternal());
+diff --git a/base/packages/SystemUI/src/com/android/systemui/power/PowerUI.java b/base/packages/SystemUI/src/com/android/systemui/power/PowerUI.java
+index a00bb904d..0087106cd 100755
+--- a/base/packages/SystemUI/src/com/android/systemui/power/PowerUI.java
++++ b/base/packages/SystemUI/src/com/android/systemui/power/PowerUI.java
+@@ -16,6 +16,8 @@
+ 
+ package com.android.systemui.power;
+ 
++import android.app.AlarmManager;
++import android.app.PendingIntent;
+ import android.content.BroadcastReceiver;
+ import android.content.ContentResolver;
+ import android.content.Context;
+@@ -76,8 +78,12 @@ public class PowerUI extends SystemUI implements CommandQueue.Callbacks {
+     static final long THREE_HOURS_IN_MILLIS = DateUtils.HOUR_IN_MILLIS * 3;
+     private static final int CHARGE_CYCLE_PERCENT_RESET = 45;
+     private static final long SIX_HOURS_MILLIS = Duration.ofHours(6).toMillis();
++    private static final long INACTIVITY_SHUTDOWN_DELAY_MS = Duration.ofMinutes(15).toMillis();
++    private static final int INACTIVITY_SHUTDOWN_COUNTDOWN_SECONDS = 30;
+     public static final int NO_ESTIMATE_AVAILABLE = -1;
+     private static final String BOOT_COUNT_KEY = "boot_count";
++    private static final String ACTION_INACTIVITY_SHUTDOWN_TRIGGER =
++            "com.android.systemui.power.ACTION_INACTIVITY_SHUTDOWN_TRIGGER";
+     private static final String PREFS = "powerui_prefs";
+ 
+     private final Handler mHandler = new Handler();
+@@ -85,6 +91,7 @@ public class PowerUI extends SystemUI implements CommandQueue.Callbacks {
+     final Receiver mReceiver = new Receiver();
+ 
+     private PowerManager mPowerManager;
++    private AlarmManager mAlarmManager;
+     private WarningsUI mWarnings;
+     private InattentiveSleepWarningView mOverlayView;
+     private final Configuration mLastConfiguration = new Configuration();
+@@ -114,6 +121,7 @@ public class PowerUI extends SystemUI implements CommandQueue.Callbacks {
+     private final BroadcastDispatcher mBroadcastDispatcher;
+     private final CommandQueue mCommandQueue;
+     private final Lazy<StatusBar> mStatusBarLazy;
++    private PendingIntent mInactivityShutdownPendingIntent;
+ 
+     @Inject
+     public PowerUI(Context context, BroadcastDispatcher broadcastDispatcher,
+@@ -126,6 +134,7 @@ public class PowerUI extends SystemUI implements CommandQueue.Callbacks {
+ 
+     public void start() {
+         mPowerManager = (PowerManager) mContext.getSystemService(Context.POWER_SERVICE);
++        mAlarmManager = (AlarmManager) mContext.getSystemService(Context.ALARM_SERVICE);
+         mScreenOffTime = mPowerManager.isScreenOn() ? -1 : SystemClock.elapsedRealtime();
+         mWarnings = Dependency.get(WarningsUI.class);
+         mEnhancedEstimates = Dependency.get(EnhancedEstimates.class);
+@@ -143,6 +152,9 @@ public class PowerUI extends SystemUI implements CommandQueue.Callbacks {
+                 false, obs, UserHandle.USER_ALL);
+         updateBatteryWarningLevels();
+         mReceiver.init();
++        if (mScreenOffTime != -1) {
++            scheduleInactivityShutdown();
++        }
+ 
+         // Check to see if we need to let the user know that the phone previously shut down due
+         // to the temperature being too high.
+@@ -239,6 +251,7 @@ public class PowerUI extends SystemUI implements CommandQueue.Callbacks {
+             filter.addAction(Intent.ACTION_BATTERY_CHANGED);
+             filter.addAction(Intent.ACTION_SCREEN_OFF);
+             filter.addAction(Intent.ACTION_SCREEN_ON);
++            filter.addAction(ACTION_INACTIVITY_SHUTDOWN_TRIGGER);
+             filter.addAction(Intent.ACTION_USER_SWITCHED);
+             mBroadcastDispatcher.registerReceiverWithHandler(this, filter, mHandler);
+             // Force get initial values. Relying on Sticky behavior until API for getting info.
+@@ -356,6 +369,7 @@ public class PowerUI extends SystemUI implements CommandQueue.Callbacks {
+                 //wirteGpio("0",SHOUTAN_PATH);
+                 //wirteGpio("0",LORA_PATH);
+                 mScreenOffTime = SystemClock.elapsedRealtime();
++                scheduleInactivityShutdown();
+             } else if (Intent.ACTION_SCREEN_ON.equals(action)) {
+                 Slog.d(TAG, "xxx  ACTION_SCREEN_ON");
+                 //Slog.d(TAG, "xxx  executeSequentially()");
+@@ -367,7 +381,16 @@ public class PowerUI extends SystemUI implements CommandQueue.Callbacks {
+                     executeSequentially();
+                 }*/
+                 mScreenOffTime = -1;
++                cancelInactivityShutdownAlarmOnly();
++            } else if (ACTION_INACTIVITY_SHUTDOWN_TRIGGER.equals(action)) {
++                Slog.i(TAG, "inactivity shutdown trigger received, showing countdown dialog");
++                mWarnings.showInactivityShutdownWarning(INACTIVITY_SHUTDOWN_COUNTDOWN_SECONDS);
+             } else if (Intent.ACTION_USER_SWITCHED.equals(action)) {
++                if (mPowerManager.isScreenOn()) {
++                    cancelInactivityShutdown();
++                } else {
++                    scheduleInactivityShutdown();
++                }
+                 mWarnings.userSwitched();
+             } else {
+                 Slog.w(TAG, "unknown intent: " + intent);
+@@ -395,7 +418,39 @@ public class PowerUI extends SystemUI implements CommandQueue.Callbacks {
+ 
+     }
+ 
++    private void scheduleInactivityShutdown() {
++        cancelInactivityShutdownAlarmOnly();
++        final long triggerAt = SystemClock.elapsedRealtime() + INACTIVITY_SHUTDOWN_DELAY_MS;
++        if (mAlarmManager != null) {
++            mAlarmManager.setExactAndAllowWhileIdle(
++                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
++                    triggerAt,
++                    getInactivityShutdownPendingIntent());
++        }
++    }
++
++    private void cancelInactivityShutdownAlarmOnly() {
++        if (mAlarmManager != null) {
++            mAlarmManager.cancel(getInactivityShutdownPendingIntent());
++        }
++    }
+ 
++    private void cancelInactivityShutdown() {
++        cancelInactivityShutdownAlarmOnly();
++        mWarnings.dismissInactivityShutdownWarning();
++    }
++
++    private PendingIntent getInactivityShutdownPendingIntent() {
++        if (mInactivityShutdownPendingIntent == null) {
++            Intent intent = new Intent(ACTION_INACTIVITY_SHUTDOWN_TRIGGER)
++                    .setPackage(mContext.getPackageName())
++                    .setFlags(Intent.FLAG_RECEIVER_FOREGROUND);
++            mInactivityShutdownPendingIntent = PendingIntent.getBroadcast(
++                    mContext, 0, intent,
++                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
++        }
++        return mInactivityShutdownPendingIntent;
++    }
+ 
+     protected void maybeShowBatteryWarningV2(boolean plugged, int bucket) {
+         final boolean hybridEnabled = mEnhancedEstimates.isHybridNotificationEnabled();
+@@ -527,6 +582,7 @@ public class PowerUI extends SystemUI implements CommandQueue.Callbacks {
+ 
+         final boolean canShow = canShowWarning || canShowSevereWarning;
+ 
++
+         if (DEBUG) {
+             Slog.d(TAG, "Enhanced trigger is: " + canShow + "\nwith battery snapshot:"
+                     + " mLowWarningShownThisChargeCycle: " + mLowWarningShownThisChargeCycle
+@@ -545,8 +601,13 @@ public class PowerUI extends SystemUI implements CommandQueue.Callbacks {
+     protected void maybeShowBatteryWarning(
+             BatteryStateSnapshot currentSnapshot,
+             BatteryStateSnapshot lastSnapshot) {
++        
+         final boolean playSound = currentSnapshot.getBucket() != lastSnapshot.getBucket()
+-                || lastSnapshot.getPlugged();
++                || lastSnapshot.getPlugged()
++                || (!currentSnapshot.getPlugged() 
++                    && lastSnapshot.getBucket() < 0
++                    && currentSnapshot.getBatteryLevel() < lastSnapshot.getBatteryLevel());
++
+ 
+         if (shouldShowLowBatteryWarning(currentSnapshot, lastSnapshot)) {
+             mWarnings.showLowBatteryWarning(playSound);
+@@ -561,12 +622,21 @@ public class PowerUI extends SystemUI implements CommandQueue.Callbacks {
+     boolean shouldShowLowBatteryWarning(
+             BatteryStateSnapshot currentSnapshot,
+             BatteryStateSnapshot lastSnapshot) {
+-        return !currentSnapshot.getPlugged()
++        // return !currentSnapshot.getPlugged()
++        final boolean shouldShowByBucket = !currentSnapshot.getPlugged()
+                 && !currentSnapshot.isPowerSaver()
+                 && (((currentSnapshot.getBucket() < lastSnapshot.getBucket()
+                         || lastSnapshot.getPlugged())
+                 && currentSnapshot.getBucket() < 0))
+                 && currentSnapshot.getBatteryStatus() != BatteryManager.BATTERY_STATUS_UNKNOWN;
++    
++        final boolean shouldShowByLevelDrop = !currentSnapshot.getPlugged()
++                && !currentSnapshot.isPowerSaver()
++                && currentSnapshot.getBucket() < 0
++                && currentSnapshot.getBatteryStatus() != BatteryManager.BATTERY_STATUS_UNKNOWN
++                && currentSnapshot.getBatteryLevel() < lastSnapshot.getBatteryLevel();
++
++        return shouldShowByBucket || shouldShowByLevelDrop;
+     }
+ 
+     @VisibleForTesting
+@@ -760,6 +830,10 @@ public class PowerUI extends SystemUI implements CommandQueue.Callbacks {
+         void showUsbHighTemperatureAlarm();
+ 
+         void showThermalShutdownWarning();
++        
++        void showInactivityShutdownWarning(int countdownSeconds);
++
++        void dismissInactivityShutdownWarning();
+ 
+         void dump(PrintWriter pw);
+ 
+diff --git a/base/services/core/java/com/android/server/BatteryService.java b/base/services/core/java/com/android/server/BatteryService.java
+index e9d260096..26d6f0152 100755
+--- a/base/services/core/java/com/android/server/BatteryService.java
++++ b/base/services/core/java/com/android/server/BatteryService.java
+@@ -126,6 +126,12 @@ public final class BatteryService extends SystemService {
+     private static final long BATTERY_LEVEL_CHANGE_THROTTLE_MS = 60_000;
+     private static final int MAX_BATTERY_LEVELS_QUEUE_SIZE = 100;
+ 
++    // battery level offset for triggering display updates
++    private static final int DISPLAY_LEVEL_OFFSET_TRIGGER = 30;
++    private static final int DISPLAY_LEVEL_OFFSET = 10;
++    private static final int LOW_BATTERY_SHUTDOWN_LEVEL = 20;
++    private static final long LOW_BATTERY_SHUTDOWN_DELAY_MS = 30_000;
++
+     // Used locally for determining when to make a last ditch effort to log
+     // discharge stats before the device dies.
+     private int mCriticalBatteryLevel;
+@@ -159,6 +165,9 @@ public final class BatteryService extends SystemService {
+     private int mLastMaxChargingCurrent;
+     private int mLastMaxChargingVoltage;
+     private int mLastChargeCounter;
++    
++    // Scheduled shutdown
++    private boolean mShutdownByLowBatteryScheduled;
+ 
+     private int mSequence = 1;
+ 
+@@ -327,6 +336,17 @@ public final class BatteryService extends SystemService {
+         processValuesLocked(true);
+     }
+ 
++    // 显示电量避免异常值
++    private int toDisplayBatteryLevel(int rawLevel) {
++        // 低电区间显示偏移
++        if (rawLevel <= DISPLAY_LEVEL_OFFSET_TRIGGER) {
++            // 最小只能是 0 ，电量显示不能有复数
++            return Math.max(0, rawLevel - DISPLAY_LEVEL_OFFSET);
++        }
++        // 如果不在低电区间，就保持不变
++        return rawLevel;
++    }
++
+     private boolean isPoweredLocked(int plugTypeSet) {
+         // assume we are powered if battery state is unknown so
+         // the "stay on while plugged in" option will work.
+@@ -348,6 +368,9 @@ public final class BatteryService extends SystemService {
+     private boolean shouldSendBatteryLowLocked() {
+         final boolean plugged = mPlugType != BATTERY_PLUGGED_NONE;
+         final boolean oldPlugged = mLastPlugType != BATTERY_PLUGGED_NONE;
++        // 把当前/上一次真实电量，换成显示电量
++        final int DisplayBatteryLevel = toDisplayBatteryLevel(mHealthInfo.batteryLevel);
++        final int lastDisplayBatteryLevel = toDisplayBatteryLevel(mLastBatteryLevel);
+ 
+         /* The ACTION_BATTERY_LOW broadcast is sent in these situations:
+          * - is just un-plugged (previously was plugged) and battery level is
+@@ -357,8 +380,11 @@ public final class BatteryService extends SystemService {
+          */
+         return !plugged
+                 && mHealthInfo.batteryStatus != BatteryManager.BATTERY_STATUS_UNKNOWN
+-                && mHealthInfo.batteryLevel <= mLowBatteryWarningLevel
+-                && (oldPlugged || mLastBatteryLevel > mLowBatteryWarningLevel);
++                // && mHealthInfo.batteryLevel <= mLowBatteryWarningLevel
++                // && (oldPlugged || mLastBatteryLevel > mLowBatteryWarningLevel);
++                && DisplayBatteryLevel <= mLowBatteryWarningLevel
++                // 只在刚跨过阈值或者刚拔充电器触发一次，防止电量上报都重复发
++                && (oldPlugged || lastDisplayBatteryLevel > mLowBatteryWarningLevel);
+     }
+ 
+     private boolean shouldShutdownLocked() {
+@@ -404,36 +430,56 @@ public final class BatteryService extends SystemService {
+         return isExcessDischarge;
+     }
+ 
++    // 关机状态机
+     private void shutdownIfNoPowerLocked() {
+-        // shut down gracefully if our battery is critically low and we are not powered.
+-        // wait until the system has booted before attempting to display the shutdown dialog.
+-        //if (shouldShutdownLocked()) {
+-        //Slog.d(TAG,"xxx...batse...shutdown vol:"+mHealthInfo.batteryVoltage +",level:"+mHealthInfo.batteryLevel);
+-        boolean shutdownFlag =false;
+-        if(mHealthInfo.batteryVoltage < 3450){
+-            shutdownFlag =true;
+-        }
+-        if(mHealthInfo.batteryLevel<6 && !isPoweredLocked(BatteryManager.BATTERY_PLUGGED_ANY)){
+-            shutdownFlag =true;
+-        }
+-        if (shutdownFlag){
+-            Slog.d(TAG,"xxx  shouldShutdownLocked true shutdown");
+-            mHandler.post(new Runnable() {
+-                @Override
+-                public void run() {
+-                    if (mActivityManagerInternal.isSystemReady()) {
+-                        Intent intent = new Intent(Intent.ACTION_REQUEST_SHUTDOWN);
+-                        intent.putExtra(Intent.EXTRA_KEY_CONFIRM, false);
+-                        intent.putExtra(Intent.EXTRA_REASON,
+-                                PowerManager.SHUTDOWN_LOW_BATTERY);
+-                        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+-                        mContext.startActivityAsUser(intent, UserHandle.CURRENT);
+-                    }
+-                }
+-            });
++        final boolean powered = isPoweredLocked(BatteryManager.BATTERY_PLUGGED_ANY);
++        final int rawBatteryLevel = mHealthInfo.batteryLevel;
++        final boolean shouldScheduleShutdown = !powered 
++                && mHealthInfo.batteryStatus != BatteryManager.BATTERY_STATUS_UNKNOWN
++                && rawBatteryLevel <= LOW_BATTERY_SHUTDOWN_LEVEL;
++        // 条件不满足，若已调度，取消定时任务
++        if (!shouldScheduleShutdown) {
++            if (mShutdownByLowBatteryScheduled) {
++                Slog.i(TAG, "Cancel low battery shutdown countdown");
++                mHandler.removeCallbacks(mShutdownByLowBatteryRunnable);
++                mShutdownByLowBatteryScheduled = false;
++            }
++            return;
++        }
++        // 条件满足，开启定时任务，清除标记
++        if (!mShutdownByLowBatteryScheduled) {
++            Slog.d(TAG, "Low battery reached " + rawBatteryLevel
++             + "%, scheduling shutdown in " + LOW_BATTERY_SHUTDOWN_DELAY_MS + " ms");
++            mHandler.postDelayed(mShutdownByLowBatteryRunnable, LOW_BATTERY_SHUTDOWN_DELAY_MS);
++            mShutdownByLowBatteryScheduled = true;
+         }
+     }
+ 
++    // 定时任务
++    private final Runnable mShutdownByLowBatteryRunnable = new Runnable() {
++        @Override
++        public void run() {
++            synchronized (mLock) {
++                mShutdownByLowBatteryScheduled = false;
++                final boolean shouldShutdown = !isPoweredLocked(BatteryManager.BATTERY_PLUGGED_ANY)
++                        && mHealthInfo.batteryStatus != BatteryManager.BATTERY_STATUS_UNKNOWN
++                        && mHealthInfo.batteryLevel <= LOW_BATTERY_SHUTDOWN_LEVEL;
++                if (!shouldShutdown) {
++                    return;
++                }
++            }
++
++            if (mActivityManagerInternal.isSystemReady()) {
++                Intent intent = new Intent(Intent.ACTION_REQUEST_SHUTDOWN);
++                intent.putExtra(Intent.EXTRA_KEY_CONFIRM, false);
++                intent.putExtra(Intent.EXTRA_REASON, PowerManager.SHUTDOWN_LOW_BATTERY);
++                intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
++                mContext.startActivityAsUser(intent, UserHandle.CURRENT);
++            }
++
++        }
++    };
++
+     private void shutdownIfOverTempLocked() {
+         // shut down gracefully if temperature is too high (> 68.0C by default)
+         // wait until the system has booted before attempting to display the
+@@ -500,9 +546,13 @@ public final class BatteryService extends SystemService {
+         boolean logOutlier = false;
+         long dischargeDuration = 0;
+ 
++        // 获取显示电压
++        final int DisplayBatteryLevel = toDisplayBatteryLevel(mHealthInfo.batteryLevel);
++
+         mBatteryLevelCritical =
+             mHealthInfo.batteryStatus != BatteryManager.BATTERY_STATUS_UNKNOWN
+-            && mHealthInfo.batteryLevel <= mCriticalBatteryLevel;
++            && DisplayBatteryLevel <= mCriticalBatteryLevel;
++
+         if (mHealthInfo.chargerAcOnline) {
+             mPlugType = BatteryManager.BATTERY_PLUGGED_AC;
+         } else if (mHealthInfo.chargerUsbOnline) {
+@@ -624,9 +674,9 @@ public final class BatteryService extends SystemService {
+                 // Should we now switch out of low battery mode?
+                 if (mPlugType != BATTERY_PLUGGED_NONE) {
+                     mBatteryLevelLow = false;
+-                } else if (mHealthInfo.batteryLevel >= mLowBatteryCloseWarningLevel)  {
++                } else if (DisplayBatteryLevel >= mLowBatteryCloseWarningLevel)  {
+                     mBatteryLevelLow = false;
+-                } else if (force && mHealthInfo.batteryLevel >= mLowBatteryWarningLevel) {
++                } else if (force && DisplayBatteryLevel >= mLowBatteryWarningLevel) {
+                     // If being forced, the previous state doesn't matter, we will just
+                     // absolutely check to see if we are now above the warning level.
+                     mBatteryLevelLow = false;
+@@ -673,7 +723,7 @@ public final class BatteryService extends SystemService {
+                     }
+                 });
+             } else if (mSentLowBatteryBroadcast &&
+-                    mHealthInfo.batteryLevel >= mLowBatteryCloseWarningLevel) {
++                    DisplayBatteryLevel >= mLowBatteryCloseWarningLevel) {
+                 mSentLowBatteryBroadcast = false;
+                 final Intent statusIntent = new Intent(Intent.ACTION_BATTERY_OKAY);
+                 statusIntent.setFlags(Intent.FLAG_RECEIVER_REGISTERED_ONLY_BEFORE_BOOT);
+@@ -723,14 +773,16 @@ public final class BatteryService extends SystemService {
+         final Intent intent = new Intent(Intent.ACTION_BATTERY_CHANGED);
+         intent.addFlags(Intent.FLAG_RECEIVER_REGISTERED_ONLY
+                 | Intent.FLAG_RECEIVER_REPLACE_PENDING);
++        
++        final int displayBatteryLevel = toDisplayBatteryLevel(mHealthInfo.batteryLevel);
+ 
+-        int icon = getIconLocked(mHealthInfo.batteryLevel);
++        int icon = getIconLocked(displayBatteryLevel);
+ 
+         intent.putExtra(BatteryManager.EXTRA_SEQUENCE, mSequence);
+         intent.putExtra(BatteryManager.EXTRA_STATUS, mHealthInfo.batteryStatus);
+         intent.putExtra(BatteryManager.EXTRA_HEALTH, mHealthInfo.batteryHealth);
+         intent.putExtra(BatteryManager.EXTRA_PRESENT, mHealthInfo.batteryPresent);
+-        intent.putExtra(BatteryManager.EXTRA_LEVEL, mHealthInfo.batteryLevel);
++        intent.putExtra(BatteryManager.EXTRA_LEVEL, displayBatteryLevel);
+         intent.putExtra(BatteryManager.EXTRA_BATTERY_LOW, mSentLowBatteryBroadcast);
+         intent.putExtra(BatteryManager.EXTRA_SCALE, BATTERY_SCALE);
+         intent.putExtra(BatteryManager.EXTRA_ICON_SMALL, icon);
+@@ -751,13 +803,14 @@ public final class BatteryService extends SystemService {
+     }
+ 
+     private void sendBatteryLevelChangedIntentLocked() {
++        final int displayBatteryLevel = toDisplayBatteryLevel(mHealthInfo.batteryLevel);
+         Bundle event = new Bundle();
+         long now = SystemClock.elapsedRealtime();
+         event.putInt(BatteryManager.EXTRA_SEQUENCE, mSequence);
+         event.putInt(BatteryManager.EXTRA_STATUS, mHealthInfo.batteryStatus);
+         event.putInt(BatteryManager.EXTRA_HEALTH, mHealthInfo.batteryHealth);
+         event.putBoolean(BatteryManager.EXTRA_PRESENT, mHealthInfo.batteryPresent);
+-        event.putInt(BatteryManager.EXTRA_LEVEL, mHealthInfo.batteryLevel);
++        event.putInt(BatteryManager.EXTRA_LEVEL, displayBatteryLevel);
+         event.putBoolean(BatteryManager.EXTRA_BATTERY_LOW, mSentLowBatteryBroadcast);
+         event.putInt(BatteryManager.EXTRA_SCALE, BATTERY_SCALE);
+         event.putInt(BatteryManager.EXTRA_PLUGGED, mPlugType);
+-- 
+2.34.1
+
