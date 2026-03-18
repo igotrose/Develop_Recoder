@@ -1,0 +1,58 @@
+From 23fb41c0f66e3b846c015fb6b13de7ffc6be0572 Mon Sep 17 00:00:00 2001
+From: lingzhiqiang <lzqinet@163.com>
+Date: Wed, 11 Mar 2026 10:38:21 +0800
+Subject: [PATCH] repair usb otg problem
+
+---
+ arch/arm/boot/dts/rk3288-android.dtsi | 21 +++++++++++++++++----
+ 1 file changed, 17 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/boot/dts/rk3288-android.dtsi b/arch/arm/boot/dts/rk3288-android.dtsi
+index 39385c9..52d4c63 100755
+--- a/arch/arm/boot/dts/rk3288-android.dtsi
++++ b/arch/arm/boot/dts/rk3288-android.dtsi
+@@ -358,8 +358,8 @@
+ //		blue_led_gpio = <&gpio7 12 GPIO_ACTIVE_HIGH>;
+ //		red_led_gpio = <&gpio7 13 GPIO_ACTIVE_HIGH>;
+ 		/***add end*****/
+-		rockchip,remote_wakeup;
+-		rockchip,usb_irq_wakeup;
++		// rockchip,remote_wakeup;
++		// rockchip,usb_irq_wakeup;
+ 
+ 		usb_bc {
+ 			compatible = "synopsys,phy";
+@@ -477,6 +477,18 @@
+ 	dma-coherent;
+ };
+ 
++&usbphy0 {
++	status = "okay";
++};
++
++&usbphy1 {
++	status = "okay";
++};
++
++&usbphy2 {
++	status = "okay";
++};
++
+ &usb_otg {
+ 	compatible = "rockchip,rk3288_usb20_otg";
+ 	clocks = <&usbphy0>, <&cru HCLK_OTG0>;
+@@ -485,8 +497,9 @@
+ 		 <&cru SRST_USBOTG_PHY>,
+ 		 <&cru SRST_USBOTG_CON>;
+ 	reset-names = "otg_ahb", "otg_phy", "otg_controller";
+-	/*0 - Normal, 1 - Force Host, 2 - Force Device*/
+-	rockchip,usb-mode = <1>;
++	rockchip,usb-mode = <0>;
++	dr_mode = "otg";
++	status = "okay";
+ };
+ 
+ &pinctrl {
+-- 
+2.7.4
+
