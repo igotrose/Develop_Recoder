@@ -1,6 +1,14 @@
 # RK3288编译
 ## Android SDK
 ### 全局编译
+- 编译前设置系统版本号
+    ```bash
+    export CUSTOM_DISPLAY_ID=ZA_CF5_rk3288_7.1_mipi800_1280_SW4.1_20260311
+
+    ./build.sh -AUKuo -j$(nproc)
+    # build\tools\buildinfo.sh 里面的显示版本号
+    echo "ro.build.display.id=${CUSTOM_DISPLAY_ID:-ZX-CF5-V3.1-zhengan-$BUILD_NUMBER}"
+    ```
 
 ### 局部编译
 - u-boot
