@@ -1,0 +1,169 @@
+From 4a3bd65b725a910575a7f1203a2d11cd4490bf15 Mon Sep 17 00:00:00 2001
+From: "zx.Ling" <lingzhixin@cs-t.cn>
+Date: Fri, 20 Mar 2026 18:06:24 +0800
+Subject: [PATCH] Fix the indicator light.
+
+---
+ scripts/bm_make_package.sh                    | 37 ++++++++++---------
+ .../arm/dts/bitmain-bm1684x-sm7m-v1.0.dts     |  4 +-
+ u-boot/board/bitmain/bm1684/board.c           | 10 ++++-
+ 3 files changed, 31 insertions(+), 20 deletions(-)
+
+diff --git a/scripts/bm_make_package.sh b/scripts/bm_make_package.sh
+index e978cfe9..7515c304 100755
+--- a/scripts/bm_make_package.sh
++++ b/scripts/bm_make_package.sh
+@@ -208,11 +208,11 @@ function compress_and_update_partition_script()
+ 	local hex_size=$(printf "0x%08x" ${size})
+ 
+ 	gzip ${filename}
+-
++	script_update "run blink_status"
+ 	script_update "${LOAD_COMMAND} ${IN_ADDR} ${OTA_PATH}$(basename ${filename}.gz)"
+ 	script_update "if test \$? -ne 0; then"
+-	script_update "led status off"
+-	script_update "led error off"
++	script_update "led state off"
++	script_update "led error on"
+ 	if [ "${LOAD_COMMAND}" = tftp ]; then
+ 		script_update "while true; do; echo \"ERROR: load package failed\"; echo \"ERROR: will auto reset \"; reset; sleep 0.5; done; fi;"
+ 	else
+@@ -222,8 +222,8 @@ function compress_and_update_partition_script()
+ 	script_update ""
+ 	script_update "unzip ${IN_ADDR} ${OUT_ADDR} ${hex_bytes}"
+ 	script_update "if test \$? -ne 0; then"
+-	script_update "led status off"
+-	script_update "led error off"
++	script_update "led state off"
++	script_update "led error on"
+ 	if [ "${LOAD_COMMAND}" = tftp ]; then
+ 		script_update "while true; do; echo \"ERROR: load package failed\"; echo \"ERROR: will auto reset \"; reset; sleep 0.5; done; fi;"
+ 	else
+@@ -233,8 +233,8 @@ function compress_and_update_partition_script()
+ 	script_update ""
+ 	script_update "mmc write ${OUT_ADDR} ${hex_disk_offset} ${hex_size}"
+ 	script_update "if test \$? -ne 0; then"
+-	script_update "led status off"
+-	script_update "led error off"
++	script_update "led state off"
++	script_update "led error on"
+ 	script_update "while true; do; echo \"ERROR: eMMC write failed\"; sleep 0.5; done; fi;"
+ 	script_update "echo"
+ 	script_update ""
+@@ -285,30 +285,33 @@ function create_top_script()
+ 	script_update "# disable MCU watchdog"
+ 	script_update "i2c dev 1; i2c mw 0x69 1 0"
+ 	script_update ""
+-	script_update "set update_all 1"
+-	script_update "led status on"
+-	script_update "led error on"
++	script_update "setenv update_all 1"
++	script_update "setenv light 0"
++	script_update "setenv blink_status 'if test \${light} = \"0\"; then led state off; setenv light 1; else led state on; setenv light 0; fi;'"
++	script_update "led state on"
++	script_update "led error off"
+ 	script_update ""
+ 	script_update "if test -n \$load_partition; then setenv distro_bootpart \$load_partition; setenv reset_after 1; fi;"
+ 	script_update ""
++	script_update "run blink_status"
+ 	script_update "echo update SPI flash"
+ 	script_update "${LOAD_COMMAND} ${SCRIPT_ADDR} ${OTA_PATH}$(basename ${SPIFCMD_SCRIPT} .cmd).scr"
+ 	script_update "source ${SCRIPT_ADDR}"
+ 	script_update ""
++	script_update "run blink_status"
+ 	script_update "echo update eMMC"
+ 	script_update "${LOAD_COMMAND} ${SCRIPT_ADDR} ${OTA_PATH}$(basename ${BOOTCMD_SCRIPT} .cmd).scr"
+ 	script_update "source ${SCRIPT_ADDR}"
+ 	script_update ""
+ 	script_update "echo all done"
+ 	script_update ""
+-	script_update "led status off"
++	script_update "led state on"
+ 	script_update "led error off"
+-	script_update "set light 1"
++	script_update "setenv light 1"
+ 	script_update ""
+ 	script_update "if test \"\$reset_after\" = \"1\"; then reset; fi;"
+ 	script_update ""
+ 	script_update "while true; do;"
+-	script_update "if test \$light = \"0\"; then led status off; set light 1; else led status on; set light 0; fi;"
+ 	script_update "echo \"Please remove the installation medium, then reboot\"; sleep 0.5; done;"
+ 
+ 	compile_script $(basename ${CURRENT_SCRIPT} .cmd)
+@@ -334,8 +337,8 @@ function create_spif_script()
+ 		script_update "if test \$? -eq 0; then"
+ 		script_update "sf probe"
+ 		script_update "if test \$? -ne 0; then"
+-		script_update "led status off"
+-		script_update "led error off"
++		script_update "led state off"
++		script_update "led error on"
+ 		script_update "while true; do; echo \"ERROR: SPI flash not exist\"; sleep 0.5; done; fi;"
+ 		script_update "print chip_type"
+ 		script_update "if test \"\$chip_type\" = \"bm1684\"; then sf update ${IN_ADDR_B} 0x0 0x200000; else sf update ${IN_ADDR} 0x0 0x200000; fi"
+@@ -360,8 +363,8 @@ function create_emmc_script()
+ 	script_update ""
+ 	script_update "mmc dev $EMMC_DEV_NUM"
+ 	script_update "if test \$? -ne 0; then"
+-	script_update "led status off"
+-	script_update "led error off"
++	script_update "led state off"
++	script_update "led error on"
+ 	script_update "while true; do; echo \"ERROR: eMMC not exist\"; sleep 0.5; done; fi;"
+ 	script_update ""
+ 	if [  ERASE_PARTITION = true ]; then
+diff --git a/u-boot/arch/arm/dts/bitmain-bm1684x-sm7m-v1.0.dts b/u-boot/arch/arm/dts/bitmain-bm1684x-sm7m-v1.0.dts
+index 8e1a9112..f4e0a0de 100644
+--- a/u-boot/arch/arm/dts/bitmain-bm1684x-sm7m-v1.0.dts
++++ b/u-boot/arch/arm/dts/bitmain-bm1684x-sm7m-v1.0.dts
+@@ -374,13 +374,13 @@
+ 		error {
+ 			label = "error";
+ 			gpios = <&tca6416 4 0>;
+-			default-state = "on";
++			default-state = "off";
+ 		};
+ 		status {
+ 			label = "status";
+ 		//	gpios = <&tca6416 11 0>;
+ 			gpios = <&port0a 7 GPIO_ACTIVE_HIGH>;
+-			default-state = "off";
++			default-state = "on";
+ 		};
+ 	};
+ };
+diff --git a/u-boot/board/bitmain/bm1684/board.c b/u-boot/board/bitmain/bm1684/board.c
+index 844914ff..55038a32 100644
+--- a/u-boot/board/bitmain/bm1684/board.c
++++ b/u-boot/board/bitmain/bm1684/board.c
+@@ -251,6 +251,14 @@ void board_before_jump_linux(void)
+ #endif
+ 
+ #ifdef CONFIG_BOARD_LATE_INIT
++static void board_set_status_led(enum led_state_t state)
++{
++	struct udevice *dev;
++
++	if (!led_get_by_label("status", &dev))
++		led_set_state(dev, state);
++}
++
+ static void __maybe_unused show_mac(void *mac)
+ {
+ 	int i;
+@@ -495,6 +503,7 @@ int board_late_init(void)
+ 	bm_wdt_stop();
+ #endif
+ 	select_board();
++	board_set_status_led(LEDST_ON);
+ 
+ 	setup_mac();
+ 	setup_mux();
+@@ -593,4 +602,3 @@ not_found:
+ 	return -1;
+ }
+ #endif
+-
+-- 
+2.34.1
+

@@ -1,0 +1,26 @@
+From dc317bd87b4e38edf23de4b2ea2e980cfb6dcd9b Mon Sep 17 00:00:00 2001
+From: "peiqin.Qiu" <qiupeiqin@cs-t.cn>
+Date: Fri, 20 Mar 2026 18:06:42 +0800
+Subject: [PATCH] Fix the indicator light.
+
+---
+ arch/arm64/boot/dts/bitmain/bm1684x_sm7m_v1.0.dts | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/bitmain/bm1684x_sm7m_v1.0.dts b/arch/arm64/boot/dts/bitmain/bm1684x_sm7m_v1.0.dts
+index ef80a24a7..56ce8b891 100644
+--- a/arch/arm64/boot/dts/bitmain/bm1684x_sm7m_v1.0.dts
++++ b/arch/arm64/boot/dts/bitmain/bm1684x_sm7m_v1.0.dts
+@@ -14,7 +14,8 @@
+ 		status {
+ 			label = "status";
+ 			gpios = <&port0a 7 GPIO_ACTIVE_HIGH>;
+-			default-state = "off";
++			default-state = "on";
++			linux,default-trigger = "default-on";
+ 		};
+ 	};
+ };
+-- 
+2.34.1
+
