@@ -82,6 +82,7 @@ SDCard 升级需要将SD卡格式化为`FAT32`格式，大小1GB以上，刷机�
     ```bash 
     # 拉取方式任意
     scp ubuntu@192.168.5.223:/data/users/ubuntu/workspace/Sophgo/bm1684/bm1684x_v23_09/neutral_version/install/soc_bm1684/emmcboot.itb /boot/emmcboot.itb
+    scp lzx@192.168.5.223:/data/users/lzx/work/SOPHGO/BM1684/v24/bsp_code/install/soc_bm1684/emmcboot.itb /boot/emmcboot.itb
     ```
 - 重启
 ### uboot 更换DTS
