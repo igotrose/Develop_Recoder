@@ -1,0 +1,512 @@
+From d8fab22f652b7efbbd167b0f96fca54141863e9f Mon Sep 17 00:00:00 2001
+From: "zx.Ling" <lingzhixin@cs-t.cn>
+Date: Fri, 27 Mar 2026 03:50:20 +0000
+Subject: [PATCH] Change the SSH version to the latest LTS version
+
+---
+ distro/sophgo-fs/etc/netplan/01-netcfg.yaml   |   8 +-
+ .../systemd/system/firstboot-openssh.service  |  13 +
+ .../system/multi-user.target.d/openssh.conf   |   3 +
+ .../systemd/system/openssh-prebuilt.service   |  16 ++
+ .../usr/sbin/firstboot-install-openssh.sh     |  52 ++++
+ distro/sophgo-fs/usr/sbin/user-auto-start.sh  |   2 +-
+ scripts/envsetup.sh                           | 245 ++++++++++++++++--
+ 10 files changed, 317 insertions(+), 22 deletions(-)
+ create mode 100755 distro/sophgo-fs/etc/systemd/system/firstboot-openssh.service
+ create mode 100644 distro/sophgo-fs/etc/systemd/system/multi-user.target.d/openssh.conf
+ create mode 100755 distro/sophgo-fs/etc/systemd/system/openssh-prebuilt.service
+ create mode 100755 distro/sophgo-fs/usr/sbin/firstboot-install-openssh.sh
+
+
+diff --git a/distro/sophgo-fs/etc/netplan/01-netcfg.yaml b/distro/sophgo-fs/etc/netplan/01-netcfg.yaml
+index 65e4fc69..15c99ba4 100755
+--- a/distro/sophgo-fs/etc/netplan/01-netcfg.yaml
++++ b/distro/sophgo-fs/etc/netplan/01-netcfg.yaml
+@@ -3,13 +3,13 @@ network:
+         renderer: networkd
+         ethernets:
+                 eth0:
+-                        dhcp4: no
+-                        addresses: [192.168.1.89/24]
++                        dhcp4: yes
++                        addresses: []
+                         optional: yes
+                         dhcp-identifier: mac
+                 eth1:
+-                        dhcp4: yes
+-                        addresses: []
++                        dhcp4: no
++                        addresses: [192.168.150.1/24]
+                         optional: yes
+                 enp3s0:
+                         dhcp4: yes
+diff --git a/distro/sophgo-fs/etc/systemd/system/firstboot-openssh.service b/distro/sophgo-fs/etc/systemd/system/firstboot-openssh.service
+new file mode 100755
+index 00000000..e18aa16f
+--- /dev/null
++++ b/distro/sophgo-fs/etc/systemd/system/firstboot-openssh.service
+@@ -0,0 +1,13 @@
++[Unit]
++Description=Install prebuilt OpenSSL OpenSSH and generate host keys
++After=local-fs.target
++Before=ssh.service ssh.socket openssh-prebuilt.service
++ConditionPathExists=!/var/lib/firstboot-openssh.done
++ConditionPathExists=/opt/prebuilt/openssh_openssl_prebuilt.tar.gz
++
++[Service]
++Type=oneshot
++ExecStart=/usr/sbin/firstboot-install-openssh.sh
++
++[Install]
++WantedBy=multi-user.target
+diff --git a/distro/sophgo-fs/etc/systemd/system/multi-user.target.d/openssh.conf b/distro/sophgo-fs/etc/systemd/system/multi-user.target.d/openssh.conf
+new file mode 100644
+index 00000000..2b92f02b
+--- /dev/null
++++ b/distro/sophgo-fs/etc/systemd/system/multi-user.target.d/openssh.conf
+@@ -0,0 +1,3 @@
++[Unit]
++Wants=firstboot-openssh.service openssh-prebuilt.service
++After=firstboot-openssh.service openssh-prebuilt.service
+diff --git a/distro/sophgo-fs/etc/systemd/system/openssh-prebuilt.service b/distro/sophgo-fs/etc/systemd/system/openssh-prebuilt.service
+new file mode 100755
+index 00000000..5168fd34
+--- /dev/null
++++ b/distro/sophgo-fs/etc/systemd/system/openssh-prebuilt.service
+@@ -0,0 +1,16 @@
++[Unit]
++Description=Prebuilt OpenSSH server
++After=network.target firstboot-openssh.service
++Requires=firstboot-openssh.service
++ConditionPathExists=/usr/local/openssh-10.2p1/sbin/sshd
++
++[Service]
++Type=simple
++ExecStartPre=/bin/mkdir -p /run/sshd
++ExecStart=/usr/local/openssh-10.2p1/sbin/sshd -D -f /usr/local/openssh-10.2p1/etc/sshd_config
++ExecReload=/bin/kill -HUP $MAINPID
++Restart=on-failure
++RestartSec=3
++
++[Install]
++WantedBy=multi-user.target
+diff --git a/distro/sophgo-fs/usr/sbin/firstboot-install-openssh.sh b/distro/sophgo-fs/usr/sbin/firstboot-install-openssh.sh
+new file mode 100755
+index 00000000..c9a90865
+--- /dev/null
++++ b/distro/sophgo-fs/usr/sbin/firstboot-install-openssh.sh
+@@ -0,0 +1,52 @@
++#!/bin/bash
++set -e
++
++DONE=/var/lib/firstboot-openssh.done
++PKG=/opt/prebuilt/openssh_openssl_prebuilt.tar.gz
++OPENSSH_ROOT=/usr/local/openssh-10.2p1
++SYSTEMD_DIR=/etc/systemd/system
++
++[ -f "$DONE" ] && exit 0
++[ -f "$PKG" ] || exit 1
++
++mkdir -p /var/lib /run/sshd
++chmod 755 /run/sshd
++
++if ! id -u sshd >/dev/null 2>&1; then
++    useradd -r -M -s /usr/sbin/nologin -d /run/sshd sshd
++fi
++
++mkdir -p "$(dirname "$DONE")"
++
++if command -v systemctl >/dev/null 2>&1; then
++    systemctl stop ssh.service ssh.socket sshd.service 2>/dev/null || true
++    systemctl disable ssh.service ssh.socket sshd.service 2>/dev/null || true
++    systemctl mask ssh.service ssh.socket sshd.service 2>/dev/null || true
++fi
++
++rm -f \
++    "$SYSTEMD_DIR"/multi-user.target.wants/ssh.service \
++    "$SYSTEMD_DIR"/sockets.target.wants/ssh.socket \
++    "$SYSTEMD_DIR"/sshd.service
++
++tar -xzf "$PKG" -C /
++rm -f "$OPENSSH_ROOT"/etc/ssh_host_*
++
++"$OPENSSH_ROOT"/bin/ssh-keygen -t rsa -f "$OPENSSH_ROOT"/etc/ssh_host_rsa_key -N ""
++"$OPENSSH_ROOT"/bin/ssh-keygen -t ecdsa -f "$OPENSSH_ROOT"/etc/ssh_host_ecdsa_key -N ""
++"$OPENSSH_ROOT"/bin/ssh-keygen -t ed25519 -f "$OPENSSH_ROOT"/etc/ssh_host_ed25519_key -N ""
++
++ln -sf "$OPENSSH_ROOT"/bin/ssh /usr/local/bin/ssh
++ln -sf "$OPENSSH_ROOT"/bin/scp /usr/local/bin/scp
++ln -sf "$OPENSSH_ROOT"/bin/sftp /usr/local/bin/sftp
++ln -sf "$OPENSSH_ROOT"/bin/ssh-add /usr/local/bin/ssh-add
++ln -sf "$OPENSSH_ROOT"/bin/ssh-agent /usr/local/bin/ssh-agent
++ln -sf "$OPENSSH_ROOT"/bin/ssh-keygen /usr/local/bin/ssh-keygen
++ln -sf "$OPENSSH_ROOT"/bin/ssh-keyscan /usr/local/bin/ssh-keyscan
++
++if command -v systemctl >/dev/null 2>&1; then
++    systemctl daemon-reload
++    systemctl enable openssh-prebuilt.service 2>/dev/null || true
++fi
++
++touch "$DONE"
+diff --git a/distro/sophgo-fs/usr/sbin/user-auto-start.sh b/distro/sophgo-fs/usr/sbin/user-auto-start.sh
+index 48aa89cd..98eb63db 100755
+--- a/distro/sophgo-fs/usr/sbin/user-auto-start.sh
++++ b/distro/sophgo-fs/usr/sbin/user-auto-start.sh
+@@ -55,6 +55,6 @@ function load_web_server(){
+     fi
+ }
+ 
+-load_web_server
++# load_web_server
+ 
+ exit 0
+\ No newline at end of file
+diff --git a/scripts/envsetup.sh b/scripts/envsetup.sh
+index 87adb663..85aa7000 100755
+--- a/scripts/envsetup.sh
++++ b/scripts/envsetup.sh
+@@ -617,7 +617,7 @@ function build_bsp_without_package()
+ 	print_notice "Run ${FUNCNAME[0]}() function"
+ 	build_fip &&
+ 
+-	build_kernel rebuild &&
++	build_kernel &&
+ 	build_ramdisk uclibc emmc &&
+ 	build_ramdisk glibc recovery &&
+ 	build_bootp &&
+@@ -728,28 +728,53 @@ function run_qemu()
+ function build_distro()
+ {
+ 	print_notice "Run ${FUNCNAME[0]}() function"
++	local UBUNTU_BASE_TAR=$DISTRO_DIR/ubuntu-base-20.04.1-base-arm64.tar.gz
++
++	if [ ! -f "$UBUNTU_BASE_TAR" ]; then
++		echo "missing ubuntu base tarball: $UBUNTU_BASE_TAR"
++		return 1
++	fi
++
+ 	sudo rm -rf $DISTRO_DIR/$DISTRO
+ 	mkdir -p $DISTRO_DIR/$DISTRO
+ 
+-	sudo qemu-debootstrap --arch=arm64 $DISTRO $DISTRO_DIR/$DISTRO
++	echo "extract ubuntu base rootfs from $UBUNTU_BASE_TAR ..."
++	sudo tar -xzf "$UBUNTU_BASE_TAR" -C $DISTRO_DIR/$DISTRO
++	sudo cp /usr/bin/qemu-aarch64-static $DISTRO_DIR/$DISTRO/usr/bin/
++	sudo cp /etc/resolv.conf $DISTRO_DIR/$DISTRO/etc/resolv.conf
++	sudo mount --bind /dev $DISTRO_DIR/$DISTRO/dev
++	sudo mount --bind /dev/pts $DISTRO_DIR/$DISTRO/dev/pts
++	sudo mount --bind /proc $DISTRO_DIR/$DISTRO/proc
++	sudo mount --bind /sys $DISTRO_DIR/$DISTRO/sys
+ 
+ 	pushd $DISTRO_DIR/$DISTRO
+ # following lines must not be started with space or tab.
+-sudo chroot . /bin/bash << "EOT"
++sudo chroot . /usr/bin/qemu-aarch64-static /bin/bash --noprofile --norc << "EOT"
++set -e
++export DEBIAN_FRONTEND=noninteractive
++
++mkdir -p /etc/apt/apt.conf.d
++echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99force-ipv4
++
++cat > /etc/apt/sources.list <<EOF
++deb http://ports.ubuntu.com/ubuntu-ports focal main restricted universe multiverse
++deb http://ports.ubuntu.com/ubuntu-ports focal-updates main restricted universe multiverse
++deb http://ports.ubuntu.com/ubuntu-ports focal-security main restricted universe multiverse
++deb http://ports.ubuntu.com/ubuntu-ports focal-backports main restricted universe multiverse
++EOF
++
++apt update
++apt install -y apt-utils dialog
++apt install -y sudo ca-certificates gnupg software-properties-common
++
+ adduser --gecos linaro --disabled-login linaro
+ echo "linaro:linaro" | chpasswd
+ usermod -a -G sudo linaro
+-adduser --gecos admin --disabled-login admin
+-echo "admin:admin" | chpasswd
+-usermod -a -G sudo admin
+-
+-apt install -y software-properties-common
+-add-apt-repository universe
+ 
+ DEBIAN_FRONTEND=noninteractive apt install -y \
+ irqbalance kexec-tools busybox i2c-tools \
+ efivar grub-efi-arm64 initramfs-tools overlayroot \
+-net-tools openssh-server libnss-mdns ethtool ifupdown \
++net-tools libnss-mdns ethtool ifupdown \
+ build-essential docker docker.io flex bison libssl-dev \
+ pciutils usbutils binutils bsdmainutils mmc-utils \
+ parted gdisk vim sysstat minicom atop u-boot-tools tree \
+@@ -760,15 +785,15 @@ expect libgoogle-glog-dev libboost-all-dev
+ 
+ apt clean
+ 
+-pip3 install flask psutil numpy pyserial
+-
+-sed -i -e '
++if [ -f /etc/sudoers ]; then
++	sed -i -e '
+ /\%sudo/ c \
+ %sudo	ALL=(ALL) NOPASSWD: ALL
+ ' /etc/sudoers
++fi
+ 
+-echo -e "127.0.0.1       sophon\n" >> /etc/hosts
+-echo -e "sophon\n" > /etc/hostname
++echo -e "127.0.0.1       bm1684\n" >> /etc/hosts
++echo -e "bm1684\n" > /etc/hostname
+ echo -e "LC_ALL=C.UTF-8\n" > /etc/default/locale
+ 
+ ln -s /sbin/init /init
+@@ -776,6 +801,12 @@ ln -s /sbin/init /init
+ exit
+ EOT
+ # the end
++	sudo umount $DISTRO_DIR/$DISTRO/dev/pts
++	sudo umount $DISTRO_DIR/$DISTRO/dev
++	sudo umount $DISTRO_DIR/$DISTRO/proc
++	sudo umount $DISTRO_DIR/$DISTRO/sys
++	sudo rm -f $DISTRO_DIR/$DISTRO/usr/bin/qemu-aarch64-static
++
+ 	sudo rm -f $DISTRO_DIR/distro_$DISTRO.tgz
+ 	sudo tar -czf $DISTRO_DIR/distro_$DISTRO.tgz *
+ 	popd
+@@ -1118,15 +1149,35 @@ function build_rootp()
+ 		sudo cp -rf $DISTRO_OVERLAY_DIR/$PRODUCT/debs/* $OUTPUT_DIR/rootfs/debs/
+ 	fi
+ 
++	# copy cached openssl/openssh prebuilt payload
++	local OPENSSH_PREBUILT_TAR=$TOP_DIR/bootloader-arm64/third_party/prebuilt/openssh_openssl_prebuilt.tar.gz
++	if [ ! -s "$OPENSSH_PREBUILT_TAR" ]; then 
++		echo "missing prebuilt openssh/openssl tar, tar: $OPENSSH_PREBUILT_TAR"
++		echo "please run: build_openssh_prebuilt"
++		return 1
++	fi
++
++	sudo mkdir -p $OUTPUT_DIR/rootfs/opt/prebuilt
++	sudo cp -f "$OPENSSH_PREBUILT_TAR" $OUTPUT_DIR/rootfs/opt/prebuilt/openssh_openssl_prebuilt.tar.gz
++
+ 	echo install packages...
+ 	pushd $OUTPUT_DIR/rootfs
++
++	sudo mount --bind /dev $OUTPUT_DIR/rootfs/dev
++	sudo mount --bind /dev/pts $OUTPUT_DIR/rootfs/dev/pts
++	sudo mount --bind /proc $OUTPUT_DIR/rootfs/proc
++	sudo mount --bind /sys $OUTPUT_DIR/rootfs/sys
++	sudo cp /usr/bin/qemu-aarch64-static "$OUTPUT_DIR/rootfs/usr/bin/"
++	sudo mkdir -p "$OUTPUT_DIR/rootfs/etc/systemd/system/multi-user.target.wants"
++
+ # following lines must not be started with space or tab.
+ # install bsp images first, so it won't run flash_update
+-sudo chroot . /bin/bash << "EOT"
++sudo chroot . /usr/bin/qemu-aarch64-static /bin/bash --noprofile --norc << "EOT"
+ 
+ if [  -d /debs ] && [ $(ls /debs/*.deb | wc -l) -gt 0 ]; then
+-
++		dpkg -i /debs/libtinfo5_*.deb /debs/libncurses5_*.deb 
+ 		dpkg -i -R /debs
++		apt-get install -f -y || true
+ 		while [ $? -ne 0 ];
+ 		do
+ 			sleep 1
+@@ -1146,12 +1197,46 @@ rm -rf /debs
+ dpkg -i /home/linaro/bsp-debs/sophgo-bsp-images_*.deb
+ dpkg -i /home/linaro/bsp-debs/sophgo-bsp-tools_*.deb
+ dpkg -i /home/linaro/bsp-debs/sophgo-bsp-rootfs_*.deb
++
++# remove legacy distro openssh server
++apt-get purge -y openssh-server openssh-sftp-server || true
++apt-get autoremove -y || true
++
++# create privilege separation user for prebuilt openssh
++if ! id -u sshd >/dev/null 2>&1; then
++	useradd -r -M -s /usr/sbin/nologin -d /run/sshd sshd
++fi
++mkdir -p /run/sshd
++chmod 755 /run/sshd
++
++# make sure firstboot script is executable
++chmod 755 /usr/sbin/firstboot-install-openssh.sh || true
++
++# disable legacy ssh units
++systemctl disable ssh.service ssh.socket sshd.service 2>/dev/null || true
++systemctl mask ssh.service ssh.socket sshd.service 2>/dev/null || true
++rm -f /etc/systemd/system/multi-user.target.wants/ssh.service
++rm -f /etc/systemd/system/sockets.target.wants/ssh.socket
++rm -f /etc/systemd/system/sshd.service
++
++# enable firstboot and prebuilt openssh units
++if [ -f /etc/systemd/system/firstboot-openssh.service ]; then
++	ln -sf /etc/systemd/system/firstboot-openssh.service \
++		/etc/systemd/system/multi-user.target.wants/firstboot-openssh.service
++fi
++if [ -f /etc/systemd/system/openssh-prebuilt.service ]; then
++	ln -sf /etc/systemd/system/openssh-prebuilt.service \
++		/etc/systemd/system/multi-user.target.wants/openssh-prebuilt.service
++fi
++
+ dpkg -i /home/linaro/bsp-debs/sophgo-bsp-qt5_*.deb
+ 
+ dpkg -i /home/linaro/bsp-debs/sophon-soc-libsophon*.deb
+ dpkg -i /home/linaro/bsp-debs/sophon-mw-soc-sophon-ffmpeg*.deb
+ dpkg -i /home/linaro/bsp-debs/sophon-mw-soc-sophon-opencv*.deb
+ 
++rm -f /etc/ssh/ssh_host_*
++
+ #dpkg -i /home/linaro/bsp-debs/sophliteos_soc_*.deb
+ #dpkg -i /home/linaro/bsp-debs/bmssm_soc_*.deb
+ 
+@@ -1164,6 +1249,22 @@ if [ "$os_release" = "Kylin" ]; then
+ 	usermod -a -G sudo linaro
+ 	chown linaro.linaro -R /home/linaro
+ fi
++
++echo "linaro:linaro" | chpasswd
++usermod -a -G sudo linaro
++chown linaro.linaro -R /home/linaro
++
++# remove factory default admin user from base image
++if id -u admin >/dev/null 2>&1; then
++	echo "remove admin user from base image"
++	pkill -u admin 2>/dev/null || true
++	userdel -r admin 2>/dev/null || userdel admin 2>/dev/null || true
++fi
++rm -rf /home/admin
++if getent group admin >/dev/null 2>&1; then
++	groupdel admin 2>/dev/null || true
++fi
++
+ if [ -f /home/linaro/bsp-debs/sophgo-se_*.deb  ]; then
+ 	echo "install se6 deb"
+ 	dpkg -i /home/linaro/bsp-debs/sophgo-se_*.deb
+@@ -1177,6 +1278,10 @@ fi
+ 
+ exit
+ EOT
++	sudo umount $OUTPUT_DIR/rootfs/dev/pts
++	sudo umount $OUTPUT_DIR/rootfs/dev
++	sudo umount $OUTPUT_DIR/rootfs/proc
++	sudo umount $OUTPUT_DIR/rootfs/sys
+ 	popd
+ 
+ 	# to make it simple, cust overlay always comes at last
+@@ -1209,6 +1314,106 @@ EOT
+ 	popd
+ }
+ 
++
++function build_openssh_prebuilt()
++{
++	print_notice "Run ${FUNCNAME[0]}() function"
++	local THIRD_PARTY_DIR="$TOP_DIR/bootloader-arm64/third_party"
++	local PREBUILT_DIR=$TOP_DIR/bootloader-arm64/third_party/prebuilt
++	local PREBUILT_TAR=$PREBUILT_DIR/openssh_openssl_prebuilt.tar.gz
++	local TMP_ROOTFS=$TOP_DIR/install/.tmp_openssh_prebuilt_rootfs
++
++	sudo mkdir -p "$PREBUILT_DIR"
++	sudo rm -f "$PREBUILT_TAR"
++	sudo rm -rf "$TMP_ROOTFS"
++	mkdir -p "$TMP_ROOTFS"
++
++	echo prepare temporary rootfs...
++	zcat $DISTRO_BASE_PKT | sudo tar -C "$TMP_ROOTFS" -x -f -
++
++	if [ -d "$TMP_ROOTFS/distro/focal" ]; then
++		sudo bash -c "mv $TMP_ROOTFS/distro/focal/* $TMP_ROOTFS && rm -rf $TMP_ROOTFS/distro"
++	fi
++	sudo mkdir -p "$TMP_ROOTFS/third_party"
++	sudo cp -a "$THIRD_PARTY_DIR"/. "$TMP_ROOTFS/third_party/"
++	sudo cp /usr/bin/qemu-aarch64-static "$TMP_ROOTFS/usr/bin/"
++	sudo mount --bind /dev "$TMP_ROOTFS/dev"
++	sudo mount --bind /dev/pts "$TMP_ROOTFS/dev/pts"
++	sudo mount --bind /proc "$TMP_ROOTFS/proc"
++	sudo mount --bind /sys "$TMP_ROOTFS/sys"
++
++	echo build openssl/openssh prebuilt in chroot...
++	pushd "$TMP_ROOTFS"
++
++sudo chroot . /usr/bin/qemu-aarch64-static /bin/bash --noprofile --norc << "EOT"
++set -e
++mkdir -p /opt/prebuilt /tmp/build-src /tmp/build-out
++rm -f /opt/prebuilt/openssh_openssl_prebuilt.tar.gz
++
++cd /tmp/build-src
++tar -xf /third_party/openssl-3.5.5.tar.gz
++cd openssl-3.5.5
++./Configure linux-aarch64 --prefix=/usr/local/openssl-3.5.5 --openssldir=/usr/local/openssl-3.5.5/ssl
++
++make -j"$(nproc)"
++make DESTDIR=/tmp/build-out install_sw
++
++cd /tmp/build-src
++tar -xf /third_party/openssh-portable-V_10_2_P1.tar.gz
++cd openssh-portable-*
++
++OPENSSL_STAGE=/tmp/build-out/usr/local/openssl-3.5.5
++[ -d "$OPENSSL_STAGE/lib64" ] && [ ! -e "$OPENSSL_STAGE/lib" ] && ln -s lib64 "$OPENSSL_STAGE/lib"
++
++export CPPFLAGS="-I$OPENSSL_STAGE/include"
++export LDFLAGS="-L$OPENSSL_STAGE/lib64 -L$OPENSSL_STAGE/lib -Wl,-rpath,/usr/local/openssl-3.5.5/lib64 -Wl,-rpath,/usr/local/openssl-3.5.5/lib"
++export PKG_CONFIG_PATH="$OPENSSL_STAGE/lib64/pkgconfig:$OPENSSL_STAGE/lib/pkgconfig"
++export LD_LIBRARY_PATH="$OPENSSL_STAGE/lib64:$OPENSSL_STAGE/lib"
++
++./configure \
++  --prefix=/usr/local/openssh-10.2p1 \
++  --sysconfdir=/usr/local/openssh-10.2p1/etc \
++  --with-ssl-dir="$OPENSSL_STAGE" \
++  --without-pam
++
++make -j"$(nproc)"
++
++mkdir -p /usr/local/openssh-10.2p1/etc
++./ssh-keygen -q -t rsa -f /usr/local/openssh-10.2p1/etc/ssh_host_rsa_key -N ""
++./ssh-keygen -q -t ecdsa -f /usr/local/openssh-10.2p1/etc/ssh_host_ecdsa_key -N ""
++./ssh-keygen -q -t ed25519 -f /usr/local/openssh-10.2p1/etc/ssh_host_ed25519_key -N ""
++
++
++make DESTDIR=/tmp/build-out install
++
++rm -f /usr/local/openssh-10.2p1/etc/ssh_host_*
++rm -f /tmp/build-out/usr/local/openssh-10.2p1/etc/ssh_host_*
++
++
++# change default ssh port from 22 to custom port
++if [ -f /tmp/build-out/usr/local/openssh-10.2p1/etc/sshd_config ]; then
++	sed -i \
++		-e 's/^#Port 22/Port 2222/' \
++		-e 's/^#PermitRootLogin prohibit-password/PermitRootLogin yes/' \
++		-e 's/^#PasswordAuthentication yes/PasswordAuthentication yes/' \
++		/tmp/build-out/usr/local/openssh-10.2p1/etc/sshd_config
++fi
++
++cd /tmp/build-out
++[ -d usr/local/openssh-10.2p1/etc ] && rm -f usr/local/openssh-10.2p1/etc/ssh_host_*
++tar -czf /opt/prebuilt/openssh_openssl_prebuilt.tar.gz .
++EOT
++	popd
++	sudo umount "$TMP_ROOTFS/dev/pts"
++	sudo umount "$TMP_ROOTFS/dev"
++	sudo umount "$TMP_ROOTFS/proc"
++	sudo umount "$TMP_ROOTFS/sys"
++	[ -s "$TMP_ROOTFS/opt/prebuilt/openssh_openssl_prebuilt.tar.gz" ] || { echo "prebuilt tar not generated"; return 1; }
++	sudo cp -f "$TMP_ROOTFS/opt/prebuilt/openssh_openssl_prebuilt.tar.gz" "$PREBUILT_TAR"
++	sudo rm -rf "$TMP_ROOTFS"
++}
++
++
+ function clean_rootp()
+ {
+ 	print_notice "Run ${FUNCNAME[0]}() function"
+@@ -1216,6 +1421,12 @@ function clean_rootp()
+ 	rm -f $OUTPUT_DIR/rootfs.tgz
+ }
+ 
++function clean_openssh_prebuilt()
++{
++	print_notice "Run ${FUNCNAME[0]}() function"
++	rm -f $TOP_DIR/bootloader-arm64/third_party/prebuilt/openssh_openssl_prebuilt.tar.gz
++}
++
+ UPDATE_TYPES=(
+ sdcard
+ tftp)
