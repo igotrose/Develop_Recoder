@@ -1,0 +1,356 @@
+From a0894eb66234905b70914a3bba4258aa81fb6544 Mon Sep 17 00:00:00 2001
+From: Qiu Peiqin <qiupeiqin@cs-t.cn>
+Date: Fri, 20 Mar 2026 08:47:41 +0800
+Subject: [PATCH] Backlight Interface
+
+---
+ base/api/current.txt                          |  15 +++
+ base/core/java/Android.bp                     |   5 +
+ .../android/app/SystemServiceRegistry.java    |  14 +++
+ base/core/java/android/content/Context.java   |   6 +
+ .../os/backlight/IRkBacklightService.aidl     |   9 ++
+ .../os/backlight/RkBacklightManager.java      |  46 ++++++++
+ base/non-updatable-api/current.txt            |  15 +++
+ .../server/backlight/RkBacklightService.java  | 104 ++++++++++++++++++
+ .../java/com/android/server/SystemServer.java |   9 ++
+ 9 files changed, 223 insertions(+)
+ create mode 100644 base/core/java/android/os/backlight/IRkBacklightService.aidl
+ create mode 100644 base/core/java/android/os/backlight/RkBacklightManager.java
+ create mode 100644 base/services/core/java/com/android/server/backlight/RkBacklightService.java
+
+diff --git a/base/api/current.txt b/base/api/current.txt
+index e90918111..6daf05eef 100755
+--- a/base/api/current.txt
++++ b/base/api/current.txt
+@@ -10218,6 +10218,7 @@ package android.content {
+     field public static final String PRINT_SERVICE = "print";
+     field public static final int RECEIVER_VISIBLE_TO_INSTANT_APPS = 1; // 0x1
+     field public static final String RESTRICTIONS_SERVICE = "restrictions";
++    field public static final String RK_BACKLIGHT_SERVICE = "rk_backlight";
+     field public static final String ROLE_SERVICE = "role";
+     field public static final String SEARCH_SERVICE = "search";
+     field public static final String SENSOR_SERVICE = "sensor";
+@@ -37202,6 +37203,20 @@ package android.os.audio {
+ 
+ }
+ 
++package android.os.backlight {
++
++  public class RkBacklightManager {
++    method public int getBacklight();
++    method public int setBacklight(int);
++    field public static final int CODE_FAILED = -1; // 0xffffffff
++    field public static final int CODE_INVALID_PARAM = -2; // 0xfffffffe
++    field public static final int CODE_NO_PERMISSION = -3; // 0xfffffffd
++    field public static final int CODE_OTHER_ERROR = -4; // 0xfffffffc
++    field public static final int CODE_SUCCESS = 0; // 0x0
++  }
++
++}
++
+ package android.os.health {
+ 
+   public class HealthStats {
+diff --git a/base/core/java/Android.bp b/base/core/java/Android.bp
+index fb27f7421..144bd6b33 100755
+--- a/base/core/java/Android.bp
++++ b/base/core/java/Android.bp
+@@ -7,3 +7,8 @@ filegroup {
+     name: "IDropBoxManagerService.aidl",
+     srcs: ["com/android/internal/os/IDropBoxManagerService.aidl"],
+ }
++
++filegroup {
++    name: "IRkBacklightService.aidl",
++    srcs: ["android/os/backlight/IRkBacklightService.aidl"],
++}
+diff --git a/base/core/java/android/app/SystemServiceRegistry.java b/base/core/java/android/app/SystemServiceRegistry.java
+index 3ef1aff98..96c6e2ab1 100755
+--- a/base/core/java/android/app/SystemServiceRegistry.java
++++ b/base/core/java/android/app/SystemServiceRegistry.java
+@@ -201,6 +201,11 @@ import android.view.inputmethod.InputMethodManager;
+ import android.view.textclassifier.TextClassificationManager;
+ import android.view.textservice.TextServicesManager;
+ 
++
++import android.os.backlight.IRkBacklightService;
++import android.os.backlight.RkBacklightManager;
++
++
+ import com.android.internal.app.IAppOpsService;
+ import com.android.internal.app.IBatteryStats;
+ import com.android.internal.app.ISoundTriggerService;
+@@ -244,6 +249,15 @@ public final class SystemServiceRegistry {
+     private SystemServiceRegistry() { }
+ 
+     static {
++        registerService(Context.RK_BACKLIGHT_SERVICE, RkBacklightManager.class, 
++            new CachedServiceFetcher<RkBacklightManager>() {
++            @Override
++            public RkBacklightManager createService(ContextImpl ctx) {
++                IBinder b = ServiceManager.getService(Context.RK_BACKLIGHT_SERVICE);
++                IRkBacklightService service = IRkBacklightService.Stub.asInterface(b);
++                return new RkBacklightManager(ctx.getOuterContext(), service);
++            }});
++
+         //CHECKSTYLE:OFF IndentationCheck
+         registerService(Context.ACCESSIBILITY_SERVICE, AccessibilityManager.class,
+                 new CachedServiceFetcher<AccessibilityManager>() {
+diff --git a/base/core/java/android/content/Context.java b/base/core/java/android/content/Context.java
+index 8472144a9..df4fdf3e5 100755
+--- a/base/core/java/android/content/Context.java
++++ b/base/core/java/android/content/Context.java
+@@ -3721,6 +3721,12 @@ public abstract class Context {
+      */
+     public static final String POWER_SERVICE = "power";
+ 
++    /**
++     *  Use with {@link #getSystemService(String)} to retrieve a
++     *  {@link android.os.RkBacklightManager} for accessing the rockchip backlight service.
++     */
++    public static final String RK_BACKLIGHT_SERVICE = "rk_backlight";
++
+     /**
+      * Use with {@link #getSystemService(String)} to retrieve a
+      * {@link android.os.RecoverySystem} for accessing the recovery system
+diff --git a/base/core/java/android/os/backlight/IRkBacklightService.aidl b/base/core/java/android/os/backlight/IRkBacklightService.aidl
+new file mode 100644
+index 000000000..343249ec1
+--- /dev/null
++++ b/base/core/java/android/os/backlight/IRkBacklightService.aidl
+@@ -0,0 +1,9 @@
++package android.os.backlight;
++
++/**
++ * @hide
++ */
++interface IRkBacklightService {
++    int setBacklight(int level);
++    int getBacklight();
++}
+\ No newline at end of file
+diff --git a/base/core/java/android/os/backlight/RkBacklightManager.java b/base/core/java/android/os/backlight/RkBacklightManager.java
+new file mode 100644
+index 000000000..e1fc482cc
+--- /dev/null
++++ b/base/core/java/android/os/backlight/RkBacklightManager.java
+@@ -0,0 +1,46 @@
++package android.os.backlight;
++
++import android.annotation.NonNull;
++import android.annotation.Nullable;
++import android.content.Context;
++import android.os.RemoteException;
++
++public class RkBacklightManager   { 
++
++    public static final int CODE_SUCCESS = 0;  
++    public static final int CODE_FAILED = -1;
++    public static final int CODE_INVALID_PARAM = -2;
++    public static final int CODE_NO_PERMISSION = -3;
++    public static final int CODE_OTHER_ERROR = -4;
++
++    private final Context mContext;
++    private IRkBacklightService mService;
++    
++    /** @hide */
++    public RkBacklightManager (Context context, IRkBacklightService service) {
++        mContext = context;
++        mService = service;
++    }
++
++    public int setBacklight(int level) {
++        try {
++            if (mService != null) {
++                return mService.setBacklight(level);
++            }
++        } catch (RemoteException e) {
++            throw e.rethrowFromSystemServer();
++        }
++        return CODE_FAILED;
++    }
++
++    public int getBacklight() {
++        try {
++            if (mService != null) {
++                return mService.getBacklight();
++            }
++        } catch (RemoteException e) {
++            throw e.rethrowFromSystemServer();
++        }
++        return CODE_FAILED;
++    }
++}
+diff --git a/base/non-updatable-api/current.txt b/base/non-updatable-api/current.txt
+index f0d6871ad..d14648fba 100755
+--- a/base/non-updatable-api/current.txt
++++ b/base/non-updatable-api/current.txt
+@@ -10218,6 +10218,7 @@ package android.content {
+     field public static final String PRINT_SERVICE = "print";
+     field public static final int RECEIVER_VISIBLE_TO_INSTANT_APPS = 1; // 0x1
+     field public static final String RESTRICTIONS_SERVICE = "restrictions";
++    field public static final String RK_BACKLIGHT_SERVICE = "rk_backlight";
+     field public static final String ROLE_SERVICE = "role";
+     field public static final String SEARCH_SERVICE = "search";
+     field public static final String SENSOR_SERVICE = "sensor";
+@@ -35769,6 +35770,20 @@ package android.os.audio {
+ 
+ }
+ 
++package android.os.backlight {
++
++  public class RkBacklightManager {
++    method public int getBacklight();
++    method public int setBacklight(int);
++    field public static final int CODE_FAILED = -1; // 0xffffffff
++    field public static final int CODE_INVALID_PARAM = -2; // 0xfffffffe
++    field public static final int CODE_NO_PERMISSION = -3; // 0xfffffffd
++    field public static final int CODE_OTHER_ERROR = -4; // 0xfffffffc
++    field public static final int CODE_SUCCESS = 0; // 0x0
++  }
++
++}
++
+ package android.os.health {
+ 
+   public class HealthStats {
+diff --git a/base/services/core/java/com/android/server/backlight/RkBacklightService.java b/base/services/core/java/com/android/server/backlight/RkBacklightService.java
+new file mode 100644
+index 000000000..b4a7a0bac
+--- /dev/null
++++ b/base/services/core/java/com/android/server/backlight/RkBacklightService.java
+@@ -0,0 +1,104 @@
++package com.android.server.backlight;
++
++import android.content.Context;
++import android.os.IBinder;
++import android.os.RemoteException;
++import android.os.backlight.IRkBacklightService;
++import android.util.Log;    
++
++import java.io.File;
++import java.io.FileInputStream;
++import java.io.FileOutputStream;
++
++public class RkBacklightService extends IRkBacklightService.Stub { 
++    private static final String TAG = "RkBacklightService";
++
++    private static final String BACKLIGHT = "/sys/class/backlight/backlight/brightness";
++    
++    public static final int CODE_SUCCESS = 0;
++    public static final int CODE_FAILED = -1;
++    public static final int CODE_INVALID_PARAM = -2;
++
++    private final Context mContext;
++
++    public RkBacklightService(Context context) throws RemoteException {
++        mContext = context;
++    }
++
++    @Override
++    public int setBacklight(int level) throws RemoteException {
++        if (level < 0 || level > 255) {
++            return CODE_INVALID_PARAM;
++        }
++
++        boolean ok = writeNode(BACKLIGHT, level);
++
++        if (!ok)
++            return CODE_FAILED;
++        return CODE_SUCCESS;
++    }
++
++    @Override 
++    public int getBacklight() throws RemoteException {
++        Integer value = readNode(BACKLIGHT);
++        if (value != null)
++            return value;
++        
++        value = readNode(BACKLIGHT);
++        if (value != null)
++            return value;
++        return CODE_FAILED;
++    }
++
++    private boolean writeNode(String path, int value) {
++        File file = new File(path);
++        if (!file.exists())
++            return false;
++        
++        FileOutputStream fos = null;
++        try {
++            fos = new FileOutputStream(file);
++            fos.write((String.valueOf(value) + "\n").getBytes());
++            fos.flush();
++            return true;    
++        } catch (Exception e) {
++            e.printStackTrace();
++            return false;
++        } finally {
++            try {
++                if (fos != null)
++                    fos.close();
++            } catch (Exception ignored) {
++            }
++        }
++    }
++
++    private Integer readNode(String path) {
++        File file = new File(path);
++        if (!file.exists()) {
++            return null;
++        }
++
++        FileInputStream fis = null;
++        try {
++            byte[] buf = new byte[32];
++            fis = new FileInputStream(file);
++            int len = fis.read(buf);
++            if (len <= 0) {
++                return null;
++            }
++            String value = new String(buf, 0, len).trim();
++            return Integer.parseInt(value);
++        } catch (Exception e) {
++            Log.e(TAG, "readNode failed: " + path, e);
++            return null;
++        } finally {
++            try {
++                if (fis != null) fis.close();
++            } catch (Exception ignored) {
++            }
++        }
++    }
++
++
++}
+diff --git a/base/services/java/com/android/server/SystemServer.java b/base/services/java/com/android/server/SystemServer.java
+index 1b6cc9321..3e20f4adf 100755
+--- a/base/services/java/com/android/server/SystemServer.java
++++ b/base/services/java/com/android/server/SystemServer.java
+@@ -180,6 +180,8 @@ import com.android.server.webkit.WebViewUpdateService;
+ import com.android.server.wm.ActivityTaskManagerService;
+ import com.android.server.wm.WindowManagerGlobalLock;
+ import com.android.server.wm.WindowManagerService;
++import com.android.server.backlight.RkBacklightService;
++
+ 
+ import dalvik.system.VMRuntime;
+ 
+@@ -1598,6 +1600,13 @@ public final class SystemServer {
+                 Slog.e(TAG, "Failure starting RkAudioSettingManager Service", e);
+             }
+ 
++            Slog.i(TAG, "addService rk_backlight");
++            try {
++                ServiceManager.addService(Context.RK_BACKLIGHT_SERVICE, new RkBacklightService(context));
++            } catch (Throwable e) {
++                Slog.e(TAG, "Failure starting RkBacklightService Service", e);
++            }
++
+             mSystemServiceManager.startService(NotificationManagerService.class);
+             SystemNotificationChannels.removeDeprecated(context);
+             SystemNotificationChannels.createAll(context);
+-- 
+2.34.1
+
