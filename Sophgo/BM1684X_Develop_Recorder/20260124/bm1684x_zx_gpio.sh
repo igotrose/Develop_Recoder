@@ -1,11 +1,23 @@
 #!/bin/bash
 set -e
 
-# 自动找到 aios-gpio 对应的 gpiochip 编号（不再依赖 bm_version）
-CHIP_NAME=$(gpiodetect | awk '/aios-gpio/ {print $1; exit}')
+# 兼容不同内核/驱动版本暴露出的 label 差异：
+# 有的版本显示为 aios-gpio，有的版本显示为 I2C 设备地址 1-006c。
+GPIODETECT_OUTPUT=$(gpiodetect)
+CHIP_NAME=$(printf '%s\n' "$GPIODETECT_OUTPUT" | awk '
+  /aios-gpio/ {print $1; found=1; exit}
+  /\[1-006c\]/ {fallback=$1}
+  END {
+    if (!found && fallback != "") {
+      print fallback
+    }
+  }
+')
+
 if [ -z "$CHIP_NAME" ]; then
-  echo "ERROR: aios-gpio not found in gpiodetect output:"
-  gpiodetect
+  echo "ERROR: target gpiochip not found in gpiodetect output."
+  echo "Expected labels: aios-gpio or [1-006c]"
+  printf '%s\n' "$GPIODETECT_OUTPUT"
   exit 1
 fi
 
