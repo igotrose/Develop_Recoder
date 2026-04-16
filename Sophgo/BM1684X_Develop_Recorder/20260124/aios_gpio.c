@@ -4,348 +4,541 @@
 #include <linux/serdev.h>
 #include <linux/gpio/driver.h>
 #include <linux/of.h>
+#include <linux/of_device.h>
 #include <linux/completion.h>
 #include <linux/wait.h>
-#include <linux/serial.h> 
-
-
+#include <linux/serial.h>
+#include <linux/string.h>
+#include <linux/mutex.h>
+#include <linux/kernel.h>
+#include <linux/delay.h>
+#include <linux/errno.h>
 
 #include "aios_gpio.h"
 
-// 接收数据处理函数
-
-// 优化后的接收数据处理函数
-static int aios_gpio_recv(struct serdev_device *serdev, 
-                         const u8 *data, size_t count)
-{
-    struct aios_gpio_data *priv = serdev_device_get_drvdata(serdev);
-    static u8 packet_buffer[64];
-    static size_t buffer_pos = 0;
-    int i, processed = 0;
-    int frame_start,j,k;
-    u8 offset, value, direction;
-    
-    if (!priv || !count) 
-        return 0;
-        
-    printk(KERN_DEBUG "aios_gpio: received %zu bytes\n", count);
-    
-    // 将新数据添加到缓冲区
-    for (i = 0; i < count && buffer_pos < sizeof(packet_buffer) - 1; i++) {
-        packet_buffer[buffer_pos++] = data[i];
-        
-        // 检查是否收到完整帧 (以 0x0D 0x0A 结尾)
-        if (buffer_pos >= 2 && 
-            packet_buffer[buffer_pos-2] == 0x0D && 
-            packet_buffer[buffer_pos-1] == 0x0A) {
-            
-            // 找到完整帧，查找帧起始 (0x53)
-            frame_start = -1;
-
-            for (j = 0; j < buffer_pos; j++) {
-                if (packet_buffer[j] == AIOS_CMD_START) {
-                    frame_start = j;
-                    break;
-                }
-            }
-            
-            if (frame_start >= 0) {
-                // 计算帧长度
-                int frame_len = buffer_pos - frame_start;
-                
-                // 确保是有效的帧 (至少有5个字节: 53 CMD LEN DATA... 0D 0A)
-                if (frame_len >= 5) {
-                    u8 cmd = packet_buffer[frame_start + 1];
-                    u8 data_len = packet_buffer[frame_start + 2];
-                    
-                    // 验证帧长度是否匹配
-                    if (frame_len == data_len + 5) { // 53 + CMD + LEN + data_len + 0D0A
-                        
-                        // 复制完整帧到私有缓冲区
-                        memcpy(priv->rx_buffer, &packet_buffer[frame_start], frame_len);
-                        priv->rx_len = frame_len;
-                        
-                        printk(KERN_DEBUG "aios_gpio: complete frame: cmd=%c, len=%d data:\n", 
-                               (char)cmd, data_len);
-                        
-                        for(k=0;k<frame_len;k++)
-                        printk(KERN_DEBUG "aios_gpio: 0x%02x\n",priv->rx_buffer[k]);
-
-                        // 根据命令类型处理响应
-                        switch (cmd) {
-                            case 0x44: // 'D' - 方向查询响应
-                                if (data_len == 2) {
-                                    offset = priv->rx_buffer[3];
-                                    direction = priv->rx_buffer[4];
-                                    if (offset < priv->ngpios) {
-                                        priv->gpio_directions[offset] = direction;
-                                        printk(KERN_DEBUG "aios_gpio: offset = %d direction = %d\n", 
-                                               offset, direction);
-                                    }
-                                }
-                                break;
-                                
-                            case 0x43: // 'C' - 配置响应
-                                // 配置命令的响应通常是确认，不需要特殊处理
-                                printk(KERN_DEBUG "aios_gpio: config response received\n");
-                                break;
-                                
-                            case 0x52: // 'R' - 读取值响应
-                                if (data_len == 2) {
-                                    offset = priv->rx_buffer[3];
-                                    value = priv->rx_buffer[4];
-                                    if (offset < priv->ngpios) {
-                                        priv->gpio_values[offset] = value;
-                                        printk(KERN_DEBUG "aios_gpio: offset%d value = %d\n", 
-                                               offset, value);
-                                    }
-                                }
-                                break;
-                                
-                            case 0x4F: // 'O' - 输出响应
-                                if (data_len == 2) {
-                                    offset = priv->rx_buffer[3];
-                                    value = priv->rx_buffer[4];
-                                    if (offset < priv->ngpios) {
-                                        priv->gpio_values[offset] = value;
-                                        printk(KERN_DEBUG "aios_gpio: GPIO%d set to %d\n", 
-                                               offset, value);
-                                    }
-                                }
-                                break;
-                                
-                            case 0x69: // 'i' - 初始化响应
-                                printk(KERN_DEBUG "aios_gpio: init response received\n");
-                                break;
-                                
-                            default:
-                                printk(KERN_DEBUG "aios_gpio: unknown command response: 0x%02x\n", cmd);
-                                break;
-                        }
-                        
-                        // 完成等待 - 每收到一帧就完成一次等待
-                        complete(&priv->completion);
-                        
-                        // 清空缓冲区，准备接收下一帧
-                        buffer_pos = 0;
-                        processed = i + 1; // 返回已处理的字节数
-                        break;
-                    }
-                }
-            }
-            
-            // 如果没有找到有效帧起始，清空缓冲区（可能是垃圾数据）
-            if (frame_start < 0) {
-                printk(KERN_DEBUG "aios_gpio: invalid frame, clearing buffer\n");
-                buffer_pos = 0;
-            }
-        }
-    }
-    
-    // 如果缓冲区已满但未找到完整帧，清空缓冲区
-    if (buffer_pos >= sizeof(packet_buffer) - 1) {
-        printk(KERN_WARNING "aios_gpio: buffer full, clearing\n");
-        buffer_pos = 0;
-    }
-    
-    return processed > 0 ? processed : count; // 返回处理的字节数
-}
-
-
 /*
-static int aios_gpio_recv(struct serdev_device *serdev, 
-                         const u8 *data, size_t count)
+ * 协议里的方向值，不是 Linux gpio framework 的方向值。
+ *   direction = 1 -> 输入
+ *   direction = 2 -> 输出
+ */
+#define AIOS_PROTO_DIR_IN              0x01
+#define AIOS_PROTO_DIR_OUT             0x02
+
+#define AIOS_INIT_RETRY_MAX            3
+#define AIOS_CMD_RETRY_MAX             3
+#define AIOS_RETRY_DELAY_MS            10
+#define AIOS_QUERY_GAP_US_MIN          2000
+#define AIOS_QUERY_GAP_US_MAX          5000
+
+static inline u8 aios_get_tx_cmd(const u8 *data, size_t len)
 {
-    struct aios_gpio_data *priv = serdev_device_get_drvdata(serdev);
-    int i;
-    u8 payload_len ;
-    if (!count) 
+    if (!data || !len)
         return 0;
-        
-    // 查找命令起始标志 'S' (0x53)
-    for (i = 0; i < count; i++) {
-        if (data[i] == AIOS_CMD_START) {
-            return i;  // 返回命令起始位置
-        }
-    }
-    
-    // 处理完整命令包
-    if (count >= 5 && data[0] == AIOS_CMD_START) {
-        payload_len = data[2];
-        
-        if (count >= payload_len + 3) {
-            // 拷贝接收数据到缓冲区
-            memcpy(priv->rx_buffer, data, payload_len + 3);
-            
-            // 更新GPIO状态
-            // 这里会根据命令类型更新gpio_values和gpio_directions
-            
-            // 完成等待
-            complete(&priv->completion);
-            return payload_len + 3;
-        }
-    }
-    
+
+    /* init 可能是: 55 53 69 00 0D 0A */
+    if (len >= 3 && data[0] == 0x55 && data[1] == AIOS_CMD_START)
+        return data[2];
+
+    /* 普通帧: 53 CMD LEN ... */
+    if (len >= 2 && data[0] == AIOS_CMD_START)
+        return data[1];
+
     return 0;
 }
-*/
 
-// 发送数据到AIOS设备
-static int aios_gpio_write(struct aios_gpio_data *priv, const u8 *data, size_t len)
+static inline bool aios_tx_has_offset(u8 cmd)
+{
+    switch (cmd) {
+    case AIOS_CMD_DIRECTION_QUERY:
+    case AIOS_CMD_READ:
+    case AIOS_CMD_OUTPUT:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static inline u8 aios_get_tx_offset(const u8 *data, size_t len)
+{
+    u8 cmd = aios_get_tx_cmd(data, len);
+
+    if (!aios_tx_has_offset(cmd))
+        return 0;
+
+    if (len >= 4 && data[0] == AIOS_CMD_START)
+        return data[3];
+
+    return 0;
+}
+
+static bool aios_match_response(struct aios_gpio_data *priv,
+                                u8 cmd, u8 data_len, u8 offset)
+{
+    if (!priv)
+        return false;
+
+    if (cmd == AIOS_CMD_ERROR)
+        return true;
+
+    if (cmd != priv->expected_cmd)
+        return false;
+
+    switch (cmd) {
+    case AIOS_CMD_INIT:
+    case AIOS_CMD_CONFIG:
+        return true;
+
+    case AIOS_CMD_DIRECTION_QUERY:
+    case AIOS_CMD_READ:
+    case AIOS_CMD_OUTPUT:
+        if (!priv->expect_offset || data_len < 1)
+            return false;
+        return offset == priv->expected_offset;
+
+    default:
+        return false;
+    }
+}
+
+static void aios_update_cached_state(struct aios_gpio_data *priv,
+                                     u8 cmd, u8 data_len)
+{
+    u8 offset, value, direction;
+
+    if (!priv || data_len < 2)
+        return;
+
+    offset = priv->rx_buffer[3];
+
+    switch (cmd) {
+    case AIOS_CMD_DIRECTION_QUERY:
+        direction = priv->rx_buffer[4];
+        if (offset < min_t(u32, priv->ngpios,
+                           ARRAY_SIZE(priv->gpio_directions))) {
+            priv->gpio_directions[offset] = direction;
+            dev_dbg(&priv->serdev->dev,
+                    "aios_gpio: offset=%u direction=%u\n",
+                    offset, direction);
+        }
+        break;
+
+    case AIOS_CMD_READ:
+        value = priv->rx_buffer[4];
+        if (offset < min_t(u32, priv->ngpios,
+                           ARRAY_SIZE(priv->gpio_values))) {
+            priv->gpio_values[offset] = value;
+            dev_dbg(&priv->serdev->dev,
+                    "aios_gpio: offset=%u value=%u\n",
+                    offset, value);
+        }
+        break;
+
+    case AIOS_CMD_OUTPUT:
+        value = priv->rx_buffer[4];
+        if (offset < min_t(u32, priv->ngpios,
+                           ARRAY_SIZE(priv->gpio_values))) {
+            priv->gpio_values[offset] = value;
+            dev_dbg(&priv->serdev->dev,
+                    "aios_gpio: GPIO%u set to %u\n",
+                    offset, value);
+        }
+        break;
+
+    default:
+        break;
+    }
+}
+
+/*
+ * 接收数据处理：
+ * - 同步到帧头 0x53
+ * - 按 len+5 组帧
+ * - 尾巴必须是 0x0D 0x0A
+ * - 合法帧才更新缓存和 complete()
+ */
+static int aios_gpio_recv(struct serdev_device *serdev,
+                          const u8 *data, size_t count)
+{
+    struct aios_gpio_data *priv = serdev_device_get_drvdata(serdev);
+    int i, k;
+    int processed = 0;
+
+    if (!priv || !count)
+        return 0;
+
+    dev_dbg(&serdev->dev, "aios_gpio: received %zu bytes\n", count);
+    for (i = 0; i < count; i++)
+        dev_dbg(&serdev->dev, "aios_gpio: raw[%d] = 0x%02x\n", i, data[i]);
+
+    for (i = 0; i < count; i++) {
+        u8 b = data[i];
+
+        if (priv->buffer_pos == 0 && b != AIOS_CMD_START) {
+            dev_dbg(&serdev->dev,
+                    "aios_gpio: drop non-start byte 0x%02x\n", b);
+            processed++;
+            continue;
+        }
+
+        if (priv->buffer_pos >= AIOS_RX_BUF_SIZE) {
+            dev_warn(&serdev->dev,
+                     "aios_gpio: rx buffer overflow, reset\n");
+            priv->buffer_pos = 0;
+        }
+
+        priv->packet_buffer[priv->buffer_pos++] = b;
+        processed++;
+
+        while (priv->buffer_pos >= 3) {
+            u8 cmd;
+            u8 data_len;
+            size_t frame_len;
+            u8 offset = 0;
+
+            if (priv->packet_buffer[0] != AIOS_CMD_START) {
+                memmove(priv->packet_buffer,
+                        priv->packet_buffer + 1,
+                        priv->buffer_pos - 1);
+                priv->buffer_pos--;
+                continue;
+            }
+
+            cmd = priv->packet_buffer[1];
+            data_len = priv->packet_buffer[2];
+            frame_len = (size_t)data_len + 5;
+
+            if (frame_len > AIOS_RX_BUF_SIZE) {
+                dev_warn(&serdev->dev,
+                         "aios_gpio: invalid data_len=%u, reset buffer\n",
+                         data_len);
+                priv->buffer_pos = 0;
+                break;
+            }
+
+            if (priv->buffer_pos < frame_len)
+                break;
+
+            if (priv->packet_buffer[frame_len - 2] != 0x0D ||
+                priv->packet_buffer[frame_len - 1] != 0x0A) {
+                dev_warn(&serdev->dev,
+                         "aios_gpio: invalid frame tail, resync\n");
+                memmove(priv->packet_buffer,
+                        priv->packet_buffer + 1,
+                        priv->buffer_pos - 1);
+                priv->buffer_pos--;
+                continue;
+            }
+
+            memcpy(priv->rx_buffer, priv->packet_buffer, frame_len);
+            priv->rx_len = frame_len;
+            priv->response_valid = false;
+
+            dev_dbg(&serdev->dev,
+                    "aios_gpio: complete frame: cmd=%c, len=%u data:\n",
+                    (char)cmd, data_len);
+            for (k = 0; k < frame_len; k++)
+                dev_dbg(&serdev->dev,
+                        "aios_gpio: 0x%02x\n", priv->rx_buffer[k]);
+
+            if (data_len >= 1)
+                offset = priv->rx_buffer[3];
+
+            switch (cmd) {
+            case AIOS_CMD_INIT:
+                dev_dbg(&serdev->dev, "aios_gpio: init response received\n");
+                break;
+
+            case AIOS_CMD_CONFIG:
+                dev_dbg(&serdev->dev, "aios_gpio: config response received\n");
+                break;
+
+            case AIOS_CMD_ERROR:
+                dev_warn(&serdev->dev,
+                         "aios_gpio: E response received (status/error frame)\n");
+                break;
+
+            default:
+                break;
+            }
+
+            aios_update_cached_state(priv, cmd, data_len);
+
+            if (aios_match_response(priv, cmd, data_len, offset)) {
+                priv->response_valid = true;
+                complete(&priv->completion);
+            } else {
+                dev_dbg(&serdev->dev,
+                        "aios_gpio: frame ignored, cmd=0x%02x expected=0x%02x off=%u expected_off=%u\n",
+                        cmd, priv->expected_cmd,
+                        offset, priv->expected_offset);
+            }
+
+            if (priv->buffer_pos > frame_len) {
+                memmove(priv->packet_buffer,
+                        priv->packet_buffer + frame_len,
+                        priv->buffer_pos - frame_len);
+                priv->buffer_pos -= frame_len;
+            } else {
+                priv->buffer_pos = 0;
+            }
+        }
+    }
+
+    return processed;
+}
+
+/*
+ * 发送一帧并等待响应
+ * 返回：
+ *   0         成功
+ *   -EAGAIN   收到 E 帧，建议调用方重试当前命令
+ *   -ETIMEDOUT 超时
+ *   其他       底层发送错误
+ */
+static int aios_gpio_write(struct aios_gpio_data *priv,
+                           const u8 *data, size_t len)
 {
     int ret;
+    u8 cmd;
+    u8 offset = 0;
+    bool expect_offset;
 
     if (!priv || !priv->serdev) {
-        printk(KERN_ERR "aios_gpio: priv or serdev is NULL\n");
+        pr_err("aios_gpio: priv or serdev is NULL\n");
         return -ENODEV;
     }
-    
-    // 重置完成量
+
+    cmd = aios_get_tx_cmd(data, len);
+    expect_offset = aios_tx_has_offset(cmd);
+    if (expect_offset)
+        offset = aios_get_tx_offset(data, len);
+
+    mutex_lock(&priv->xfer_lock);
+
+    priv->buffer_pos = 0;
+    priv->rx_len = 0;
+    priv->response_valid = false;
+    priv->expected_cmd = cmd;
+    priv->expected_offset = offset;
+    priv->expect_offset = expect_offset;
+
     reinit_completion(&priv->completion);
 
-    // 发送数据
+    dev_dbg(&priv->serdev->dev,
+            "aios_gpio: write cmd=0x%02x len=%zu expected_off=%u timeout=%u\n",
+            cmd, len, offset, priv->timeout_ms);
+
     ret = serdev_device_write(priv->serdev, data, len, priv->timeout_ms);
-    if (ret < 0){
-        printk(KERN_ERR "aios_gpio: write failed: %d\n", ret);
+    if (ret < 0) {
+        dev_err(&priv->serdev->dev, "aios_gpio: write failed: %d\n", ret);
+        mutex_unlock(&priv->xfer_lock);
         return ret;
     }
-        
-    // 等待发送完成
+
     serdev_device_wait_until_sent(priv->serdev, priv->timeout_ms);
-        
-    // 等待响应超时
-    if (!wait_for_completion_timeout(&priv->completion, 
-                                    msecs_to_jiffies(priv->timeout_ms))) {
+
+    if (!wait_for_completion_timeout(&priv->completion,
+                                     msecs_to_jiffies(priv->timeout_ms))) {
+        dev_err(&priv->serdev->dev,
+                "aios_gpio: timeout waiting response for cmd=0x%02x off=%u\n",
+                cmd, offset);
+        mutex_unlock(&priv->xfer_lock);
         return -ETIMEDOUT;
     }
 
+    /*
+     * 如果收到的是 E 帧，则视为“当前事务失败但可重试”
+     */
+    if (priv->rx_len >= 2 && priv->rx_buffer[1] == AIOS_CMD_ERROR) {
+        mutex_unlock(&priv->xfer_lock);
+        return -EAGAIN;
+    }
+
+    mutex_unlock(&priv->xfer_lock);
     return 0;
 }
 
-// 查询GPIO方向   AIOS_CMD_DIRECTION_QUERY
-static int aios_gpio_query_direction(struct gpio_chip *chip, unsigned offset)
+static int aios_gpio_write_retry(struct aios_gpio_data *priv,
+                                 const u8 *data, size_t len,
+                                 int retry_max, unsigned int delay_ms)
 {
-    struct aios_gpio_data *priv = gpiochip_get_data(chip);
-    u8 cmd[] = {
-        AIOS_CMD_START,         // 0x53
-        AIOS_CMD_DIRECTION_QUERY ,  // 'D' - 查询方向
-        0x01,                       // 数据长度
-        offset,                     // GPIO偏移
-        0x0D, 0x0A                // 结束标志
-    };
-    
-    dev_info(&priv->serdev->dev, "get_direction: offset %d\n", offset);
+    int ret, i;
 
-    return aios_gpio_write(priv, cmd, sizeof(cmd));
-}
+    for (i = 0; i < retry_max; i++) {
+        ret = aios_gpio_write(priv, data, len);
+        if (!ret)
+            return 0;
 
-// GPIO设置配置   AIOS_CMD_CONFIG
-static int aios_gpio_gpio_set_config(struct gpio_chip *chip,
-                                    unsigned offset, unsigned long config)
-{
-    struct aios_gpio_data *priv = gpiochip_get_data(chip);
-    u8 cmd[] = {
-        AIOS_CMD_START,       // 起始标志
-        AIOS_CMD_CONFIG,      // 配置命令
-        0x03,                 // 数据长度
-        offset,               // GPIO偏移
-        0x02,                 // 配置参数     
-        0x03,                 // 配置参数 
-        0x0D, 0x0A          // 结束标志
-    };
-    
-    dev_info(&priv->serdev->dev,"set_config : offset %d\n param %d \n" , offset,pinconf_to_config_param(config));
+        if (ret != -EAGAIN && ret != -ETIMEDOUT)
+            return ret;
 
-    // 处理支持的配置参数
-    switch(pinconf_to_config_param(config)) {
-        case PIN_CONFIG_PERSIST_STATE:
-             return 0;
-        case PIN_CONFIG_OUTPUT:  // 添加对输出配置的支持
-        case PIN_CONFIG_INPUT_ENABLE:  // 添加对输入配置的支持
-        case PIN_CONFIG_DRIVE_PUSH_PULL:
-            return aios_gpio_write(priv, cmd, sizeof(cmd));
-        default:
-            dev_err(&priv->serdev->dev,"Unsupported config param: %u\n", 
-                    pinconf_to_config_param(config));
-            return -ENOTSUPP;
+        dev_warn(&priv->serdev->dev,
+                 "aios_gpio: retry %d/%d for cmd=0x%02x ret=%d\n",
+                 i + 1, retry_max, aios_get_tx_cmd(data, len), ret);
+        msleep(delay_ms);
     }
+
+    return ret;
 }
 
-
-
-
-// 设置GPIO值  AIOS_CMD_OUTPUT
-static void aios_gpio_gpio_set_value(struct gpio_chip *chip,
-                                   unsigned offset, int value)
+static int aios_gpio_query_direction(struct gpio_chip *chip, unsigned int offset)
 {
     struct aios_gpio_data *priv = gpiochip_get_data(chip);
+    u8 dir;
     u8 cmd[] = {
         AIOS_CMD_START,
-        AIOS_CMD_OUTPUT,    // 设置值命令
-        0x02,               // 数据长度
-        offset,             // GPIO偏移
-        value,              // 设置的值
+        AIOS_CMD_DIRECTION_QUERY,
+        0x01,
+        offset,
         0x0D, 0x0A
     };
     int ret;
-    dev_info(&priv->serdev->dev,"set_value : offset %d  value %d \n", offset,value);
 
-    ret = aios_gpio_write(priv, cmd, sizeof(cmd));
-    if (ret < 0) {
-        dev_err(chip->parent, "Failed to set GPIO value\n");
-        return ;
-    }
-    // 如果成功 更新缓存值
-    if (offset < priv->ngpios) {
-        priv->gpio_values[offset] = value ? 0x01 : 0x00;
-    }
-}
-
-// 获取GPIO值
-static int aios_gpio_gpio_get_value(struct gpio_chip *chip,
-                                   unsigned offset)
-{
-    struct aios_gpio_data *priv = gpiochip_get_data(chip);
-    u8 cmd[] = {
-        AIOS_CMD_START,
-        AIOS_CMD_READ,  // 获取值命令    
-        0x01,           // 数据长度
-        offset,          // GPIO偏移
-        0x0D, 0x0A
-    };  
-    int ret ;
-
-    // 检查偏移是否有效
     if (offset >= priv->ngpios)
         return -EINVAL;
 
-    dev_info(&priv->serdev->dev,"get_value : offset %d \n", offset);
+    dev_info(&priv->serdev->dev, "get_direction: offset %u\n", offset);
 
-    ret = aios_gpio_write(priv, cmd, sizeof(cmd));
+    /*
+     * 优先走缓存，避免 probe 完成后框架又立刻打一轮串口查询
+     */
+    dir = priv->gpio_directions[offset];
+    if (dir == AIOS_PROTO_DIR_IN)
+        return GPIO_LINE_DIRECTION_IN;
+    if (dir == AIOS_PROTO_DIR_OUT)
+        return GPIO_LINE_DIRECTION_OUT;
+
+    ret = aios_gpio_write_retry(priv, cmd, sizeof(cmd),
+                                AIOS_CMD_RETRY_MAX,
+                                AIOS_RETRY_DELAY_MS);
     if (ret < 0)
         return ret;
 
-    // 返回GPIO值
+    dir = priv->gpio_directions[offset];
+    if (dir == AIOS_PROTO_DIR_IN)
+        return GPIO_LINE_DIRECTION_IN;
+    if (dir == AIOS_PROTO_DIR_OUT)
+        return GPIO_LINE_DIRECTION_OUT;
+
+    dev_warn(&priv->serdev->dev,
+             "aios_gpio: unexpected direction value %u for GPIO%u\n",
+             dir, offset);
+    return -EIO;
+}
+
+static int aios_gpio_gpio_set_config(struct gpio_chip *chip,
+                                     unsigned int offset,
+                                     unsigned long config)
+{
+    struct aios_gpio_data *priv = gpiochip_get_data(chip);
+    u8 cmd[] = {
+        AIOS_CMD_START,
+        AIOS_CMD_CONFIG,
+        0x03,
+        offset,
+        0x02,
+        0x03,
+        0x0D, 0x0A
+    };
+
+    dev_info(&priv->serdev->dev,
+             "set_config: offset %u param %u\n",
+             offset, pinconf_to_config_param(config));
+
+    switch (pinconf_to_config_param(config)) {
+    case PIN_CONFIG_PERSIST_STATE:
+        return 0;
+
+    case PIN_CONFIG_OUTPUT:
+    case PIN_CONFIG_INPUT_ENABLE:
+    case PIN_CONFIG_DRIVE_PUSH_PULL:
+        return aios_gpio_write_retry(priv, cmd, sizeof(cmd),
+                                     AIOS_CMD_RETRY_MAX,
+                                     AIOS_RETRY_DELAY_MS);
+
+    default:
+        dev_err(&priv->serdev->dev,
+                "Unsupported config param: %u\n",
+                pinconf_to_config_param(config));
+        return -ENOTSUPP;
+    }
+}
+
+static void aios_gpio_gpio_set_value(struct gpio_chip *chip,
+                                     unsigned int offset, int value)
+{
+    struct aios_gpio_data *priv = gpiochip_get_data(chip);
+    u8 cmd[] = {
+        AIOS_CMD_START,
+        AIOS_CMD_OUTPUT,
+        0x02,
+        offset,
+        value ? 0x01 : 0x00,
+        0x0D, 0x0A
+    };
+    int ret;
+
+    dev_info(&priv->serdev->dev,
+             "set_value: offset %u value %d\n", offset, value);
+
+    ret = aios_gpio_write_retry(priv, cmd, sizeof(cmd),
+                                AIOS_CMD_RETRY_MAX,
+                                AIOS_RETRY_DELAY_MS);
+    if (ret < 0) {
+        dev_err(chip->parent, "Failed to set GPIO value: %d\n", ret);
+        return;
+    }
+
+    if (offset < min_t(u32, priv->ngpios, ARRAY_SIZE(priv->gpio_values)))
+        priv->gpio_values[offset] = value ? 0x01 : 0x00;
+}
+
+static int aios_gpio_gpio_get_value(struct gpio_chip *chip,
+                                    unsigned int offset)
+{
+    struct aios_gpio_data *priv = gpiochip_get_data(chip);
+    u8 cmd[] = {
+        AIOS_CMD_START,
+        AIOS_CMD_READ,
+        0x01,
+        offset,
+        0x0D, 0x0A
+    };
+    int ret;
+
+    if (offset >= priv->ngpios)
+        return -EINVAL;
+
+    dev_info(&priv->serdev->dev, "get_value: offset %u\n", offset);
+
+    ret = aios_gpio_write_retry(priv, cmd, sizeof(cmd),
+                                AIOS_CMD_RETRY_MAX,
+                                AIOS_RETRY_DELAY_MS);
+    if (ret < 0)
+        return ret;
+
     return priv->gpio_values[offset] ? 1 : 0;
 }
 
-// 设置GPIO为输出  AIOS_CMD_CONFIG
 static int aios_gpio_gpio_direction_output(struct gpio_chip *chip,
-                                          unsigned offset, int value)
+                                           unsigned int offset, int value)
 {
     struct aios_gpio_data *priv = gpiochip_get_data(chip);
     int ret;
     u8 cmd[] = {
         AIOS_CMD_START,
-        AIOS_CMD_CONFIG,    // 配置命令
-        0x02,               // 数据长度
+        AIOS_CMD_CONFIG,
+        0x02,
         offset,
-        0x02,               // 方向: 输出
+        AIOS_PROTO_DIR_OUT,
         0x0D, 0x0A
     };
-    
-    dev_info(&priv->serdev->dev,"set_output : offset %d\n", offset);
-    ret = aios_gpio_write(priv, cmd, sizeof(cmd));
+
+    dev_info(&priv->serdev->dev, "set_output: offset %u\n", offset);
+
+    ret = aios_gpio_write_retry(priv, cmd, sizeof(cmd),
+                                AIOS_CMD_RETRY_MAX,
+                                AIOS_RETRY_DELAY_MS);
     if (ret < 0)
         return ret;
 
@@ -353,128 +546,155 @@ static int aios_gpio_gpio_direction_output(struct gpio_chip *chip,
     return 0;
 }
 
-// 设置GPIO为输入  AIOS_CMD_CONFIG
 static int aios_gpio_gpio_direction_input(struct gpio_chip *chip,
-                                         unsigned offset)
+                                          unsigned int offset)
 {
     struct aios_gpio_data *priv = gpiochip_get_data(chip);
     u8 cmd[] = {
         AIOS_CMD_START,
-        AIOS_CMD_CONFIG,    // 配置命令
-        0x02,               // 数据长度
+        AIOS_CMD_CONFIG,
+        0x02,
         offset,
-        0x01,                // 方向: 输入
+        AIOS_PROTO_DIR_IN,
         0x0D, 0x0A
-    }; 
-    dev_info(&priv->serdev->dev,"set_input : offset %d\n", offset);
-    return aios_gpio_write(priv, cmd, sizeof(cmd));
+    };
+
+    dev_info(&priv->serdev->dev, "set_input: offset %u\n", offset);
+
+    return aios_gpio_write_retry(priv, cmd, sizeof(cmd),
+                                 AIOS_CMD_RETRY_MAX,
+                                 AIOS_RETRY_DELAY_MS);
 }
 
-
-static int aios_init(struct aios_gpio_data *priv)
+static int aios_init(struct aios_gpio_data *priv, bool auto_baudrate)
 {
     u8 init_cmd[] = {
         0x55,
-        AIOS_CMD_START,  // 0x53
-        AIOS_CMD_INIT,   // 'i' - 初始化
+        AIOS_CMD_START,
+        AIOS_CMD_INIT,
         0x00,
-        0x0D, 0x0A       // CR  // LF            
+        0x0D, 0x0A
     };
+    u8 sync = 0x55;
     u8 init_dir_cmd[] = {
-        AIOS_CMD_START,              // 0x53
-        AIOS_CMD_DIRECTION_QUERY,    // 'D' - 查询方向
-        0x01,                        // 数据长度
-        0x00,                        // GPIO偏移
-        0x0D, 0x0A                   // 结束标志
+        AIOS_CMD_START,
+        AIOS_CMD_DIRECTION_QUERY,
+        0x01,
+        0x00,
+        0x0D, 0x0A
     };
-    int ret,i;
-    ret = aios_gpio_write(priv, init_cmd, sizeof(init_cmd));
+    int ret, i;
+
+    if (auto_baudrate) {
+        serdev_device_write(priv->serdev, &sync, 1, priv->timeout_ms);
+        serdev_device_wait_until_sent(priv->serdev, priv->timeout_ms);
+        msleep(10);
+    }
+
+    ret = aios_gpio_write_retry(priv, init_cmd, sizeof(init_cmd),
+                                AIOS_INIT_RETRY_MAX,
+                                AIOS_RETRY_DELAY_MS);
     if (ret < 0) {
-        printk(KERN_ERR "aios_gpio,Initialization:  command failed: %d\n", ret);
+        pr_err("aios_gpio,Initialization: command failed: %d\n", ret);
         return ret;
     }
 
-    for(i=0;i<priv->ngpios;i++)
-    {
+    msleep(AIOS_POST_INIT_DELAY_MS);
+
+    for (i = 0; i < priv->ngpios; i++) {
         init_dir_cmd[3] = i;
-        ret = aios_gpio_write(priv, init_dir_cmd, sizeof(init_dir_cmd));
+
+        ret = aios_gpio_write_retry(priv, init_dir_cmd, sizeof(init_dir_cmd),
+                                    AIOS_INIT_RETRY_MAX,
+                                    AIOS_RETRY_DELAY_MS);
         if (ret < 0) {
-            printk(KERN_ERR "aios_gpio,Initialization: Failed to query direction for GPIO %d: %d\n", i, ret);
+            pr_err("aios_gpio,Initialization: Failed to query direction for GPIO %d: %d\n",
+                   i, ret);
             return ret;
         }
+
+        usleep_range(AIOS_QUERY_GAP_US_MIN, AIOS_QUERY_GAP_US_MAX);
     }
+
     return 0;
 }
 
-// 串行设备操作
 static const struct serdev_device_ops aios_serdev_ops = {
     .receive_buf = aios_gpio_recv,
     .write_wakeup = serdev_device_write_wakeup,
 };
-// 探测函数 - 主要初始化
+
 static int aios_gpio_probe(struct serdev_device *serdev)
 {
     struct device *dev = &serdev->dev;
     struct aios_gpio_data *priv;
     struct device_node *np = dev->of_node;
     u32 baudrate = 115200;
+    bool auto_baudrate;
     int ret;
-    
+
     dev_info(dev, "Starting AIOS GPIO probe\n");
 
-    // 检查serdev设备是否有效
-    if (!serdev) {
-        dev_err(dev, "Serdev device is NULL\n");
+    if (!serdev)
         return -EINVAL;
-    }
 
-    // 分配私有数据结构
     priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
     if (!priv)
         return -ENOMEM;
-    
+
     priv->serdev = serdev;
     serdev_device_set_drvdata(serdev, priv);
-    
-    // 打开串行设备
+
+    /* 先挂 ops，再 open */
+    serdev->ops = &aios_serdev_ops;
+
     ret = serdev_device_open(serdev);
     if (ret < 0) {
-        dev_err(dev, "Failed to open serdev device:%d\n",ret);
+        dev_err(dev, "Failed to open serdev device: %d\n", ret);
         return ret;
     }
     dev_info(dev, "Serdev device opened successfully\n");
-    
-    // 从设备树读取配置
+
     of_property_read_u32(np, "current-speed", &baudrate);
     of_property_read_u32(np, "ngpios", &priv->ngpios);
     of_property_read_u32(np, "cmd-timeout", &priv->timeout_ms);
-    
+    auto_baudrate = of_property_read_bool(np, "auto-baudrate");
 
-    // 配置串行设备
+    if (!priv->timeout_ms)
+        priv->timeout_ms = AIOS_DEFAULT_TIMEOUT_MS;
+
+    if (!priv->ngpios || priv->ngpios > ARRAY_SIZE(priv->gpio_values)) {
+        dev_err(dev, "Invalid ngpios=%u\n", priv->ngpios);
+        ret = -EINVAL;
+        goto err_close;
+    }
+
     serdev_device_set_baudrate(serdev, baudrate);
     serdev_device_set_flow_control(serdev, false);
     serdev_device_set_parity(serdev, SERDEV_PARITY_NONE);
-    dev_info(dev, "Serial device configured: %d baud, no flow control, no parity\n", baudrate);
-    
-    // 初始化完成量和等待队列
+
+    dev_info(dev,
+             "Serial device configured: %u baud, no flow control, no parity\n",
+             baudrate);
+
+    mutex_init(&priv->xfer_lock);
     init_completion(&priv->completion);
     init_waitqueue_head(&priv->waitq);
-    
-    // 设置接收回调
-   // serdev_device_set_receive_buf(serdev, aios_gpio_recv);
-    serdev->ops = &aios_serdev_ops;
-    /*   if (!serdev->ops) {
-        dev_err(dev, "Serdev device has no operations\n");
-        ret = -ENODEV;
-        goto err_close;
-    }
-    if (!serdev->ops->write_buf && !serdev->ops->write) {
-        dev_err(dev, "Serdev device missing write operations\n");
-        ret = -ENODEV;
-        goto err_close;
-    }
-    */
-    // 配置GPIO芯片
+
+    priv->buffer_pos = 0;
+    priv->rx_len = 0;
+    priv->expected_cmd = 0;
+    priv->expected_offset = 0;
+    priv->expect_offset = false;
+    priv->response_valid = false;
+
+    memset(priv->packet_buffer, 0, sizeof(priv->packet_buffer));
+    memset(priv->rx_buffer, 0, sizeof(priv->rx_buffer));
+    memset(priv->gpio_values, 0, sizeof(priv->gpio_values));
+    memset(priv->gpio_directions, 0, sizeof(priv->gpio_directions));
+
+    msleep(AIOS_INIT_DELAY_MS);
+
     priv->gpio_chip.label = "aios-gpio";
     priv->gpio_chip.parent = dev;
     priv->gpio_chip.owner = THIS_MODULE;
@@ -487,64 +707,48 @@ static int aios_gpio_probe(struct serdev_device *serdev)
     priv->gpio_chip.set = aios_gpio_gpio_set_value;
     priv->gpio_chip.set_config = aios_gpio_gpio_set_config;
     priv->gpio_chip.can_sleep = true;
-  
 
-    ret = aios_init(priv);
+    ret = aios_init(priv, auto_baudrate);
     if (ret < 0) {
         dev_err(dev, "Failed to initialize AIOS GPIO device: %d\n", ret);
         goto err_close;
-    }   
-
-/*
-    // 发送初始化命令
-    ret = aios_gpio_write(priv, init_cmd, sizeof(init_cmd));
-    if (ret < 0) {
-        dev_err(dev, "Initialization command failed: %d\n", ret);
-        goto err_close;
     }
-*/ 
 
-    // 注册GPIO芯片
     ret = devm_gpiochip_add_data(dev, &priv->gpio_chip, priv);
     if (ret < 0) {
         dev_err(dev, "Failed to register GPIO chip: %d\n", ret);
         goto err_close;
     }
-    
-    dev_info(dev, "AIOS GPIO expander probed, %d GPIOs\n", priv->ngpios);
+
+    dev_info(dev, "AIOS GPIO expander probed, %u GPIOs\n", priv->ngpios);
     return 0;
-    
+
 err_close:
     serdev_device_close(serdev);
     return ret;
 }
 
-// 移除函数
 static void aios_gpio_remove(struct serdev_device *serdev)
 {
     struct aios_gpio_data *priv = serdev_device_get_drvdata(serdev);
-    u8 shutdown_cmd[] = {0x53, 0x49, 0x0D, 0x0A}; // 关闭命令
-    
-    if (priv->ngpios > 0) {
-        // 发送关闭命令
+    u8 shutdown_cmd[] = { 0x53, 0x49, 0x00, 0x0D, 0x0A };
+
+    if (priv && priv->ngpios > 0) {
         serdev_device_write_buf(serdev, shutdown_cmd, sizeof(shutdown_cmd));
         serdev_device_wait_until_sent(serdev, 0);
     }
-    
+
     serdev_device_close(serdev);
-    priv->serdev = NULL;
+    if (priv)
+        priv->serdev = NULL;
 }
 
-
-
-// 设备ID表
 static const struct of_device_id aios_gpio_of_match[] = {
     { .compatible = "aios,gpio" },
-    {}
+    { }
 };
 MODULE_DEVICE_TABLE(of, aios_gpio_of_match);
 
-// 串行设备驱动
 static struct serdev_device_driver aios_gpio_driver = {
     .driver = {
         .name = "aios-gpio",
@@ -558,4 +762,4 @@ module_serdev_device_driver(aios_gpio_driver);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("AIOS UART protocol GPIO expander");
-MODULE_AUTHOR("Leslie ling <lingzhixin@cs-t.cn>");
+MODULE_AUTHOR("Igotu.Qiu <qiupeiqin@cs-t.cn>");
