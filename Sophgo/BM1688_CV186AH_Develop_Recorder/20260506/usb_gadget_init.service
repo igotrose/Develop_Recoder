@@ -1,0 +1,12 @@
+[Unit]
+Description=Initialize USB Gadget (RNDIS + Mass Storage)
+After=local-fs.target sys-kernel-config.mount systemd-modules-load.service resize-helper.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/usb_gadget_init.sh
+RemainAfterExit=yes
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target
