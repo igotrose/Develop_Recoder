@@ -22,6 +22,7 @@ RNDIS_DEV_MAC="02:12:34:56:78:8a"
 RNDIS_HOST_MAC="02:12:34:56:78:8b"
 RNDIS_LABEL="BM1688 RNDIS"
 MSC_FILE=$3
+MSC_NOFUA=${4:-1}
 CVI_DIR=/tmp/usb
 CVI_GADGET=$CVI_DIR/usb_gadget/cvitek
 CVI_FUNC=$CVI_GADGET/functions
@@ -211,7 +212,13 @@ probe() {
     mkdir $CVI_GADGET/functions/$CLASS.usb$FUNC_NUM
   fi
   if [ "$CLASS" = "mass_storage" ] ; then
-    echo $MSC_FILE >$CVI_GADGET/functions/$CLASS.usb$FUNC_NUM/lun.0/file
+    LUN=$CVI_GADGET/functions/$CLASS.usb$FUNC_NUM/lun.0
+    echo $MSC_FILE >$LUN/file
+    # nofua=1: ignore host FUA requests to improve write performance.
+    # Risk: unsafe unplug/power loss may corrupt data. Always eject on PC first.
+    if [ -e $LUN/nofua ]; then
+      echo $MSC_NOFUA >$LUN/nofua
+   fi
   fi
   if [ "$CLASS" = "rndis" ] ; then
     #OS STRING
@@ -264,6 +271,11 @@ start() {
 	$ADBD_PATH/adbd &
     fi
   else
+    # Force nofua=1 for all mass_storage LUNs before binding UDC.
+    # nofua=1 improves Windows MSC write speed, but requires safe eject.
+    for f in $CVI_GADGET/functions/mass_storage.*; do
+      [ -e "$f/lun.0/nofua" ] && echo 1 > "$f/lun.0/nofua"
+    done
     # Start the gadget driver
     echo ${UDC} >$CVI_GADGET/UDC
   fi
@@ -313,7 +325,7 @@ case "$1" in
 	echo ${UDC} > $CVI_GADGET/UDC
 	;;
   *)
-	echo "Usage: $0 probe {acm|msc|cvg|uvc|uac1|mtp} {file (msc)}"
+	echo "Usage: $0 probe {acm|msc|cvg|uvc|uac1|mtp} {file (msc)} [nofua:0|1]"
 	echo "Usage: $0 start"
 	echo "Usage: $0 stop"
 	exit 1

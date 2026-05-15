@@ -1,6 +1,7 @@
 [Unit]
 Description=Initialize USB Gadget (RNDIS + Mass Storage)
 After=local-fs.target sys-kernel-config.mount systemd-modules-load.service resize-helper.service
+Wants=local-fs.target
 
 [Service]
 Type=oneshot
