@@ -6,9 +6,9 @@ static uint32_t key_down_time = 0;
 static uint32_t debounce_time = 0;
 
 /*
- * PB1 默认低电平
+ * PB1 默认高电平
  */
-static uint8_t sys_pwr_state = 0;
+static uint8_t sys_pwr_state = 1;
 
 /*
  * PA6 / PA7 默认低电平
@@ -136,29 +136,22 @@ void ClawStar_GPIO_Init(void)
 
     __HAL_RCC_GPIOA_CLK_ENABLE();
     __HAL_RCC_GPIOB_CLK_ENABLE();
+    __HAL_RCC_SYSCFG_CLK_ENABLE();
 
     /*
-     * 先预置默认输出电平，再配置为输出
-     * PB1 默认低
-     * PA6 / PA7 默认低
+     * 先预置默认输出电平，再配置为输出 PB1 默认高 PA6 / PA7 默认低
      */
-    HAL_GPIO_WritePin(SYS_PWR_CTRL_PORT,
-                      SYS_PWR_CTRL_PIN,
-                      GPIO_PIN_RESET);
-
-    HAL_GPIO_WritePin(BL_PWR_CTRL_PORT,
-                      BL_PWR_CTRL_PINS,
-                      GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(SYS_PWR_CTRL_PORT, SYS_PWR_CTRL_PIN, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(BL_PWR_CTRL_PORT, BL_PWR_CTRL_PINS, GPIO_PIN_RESET);
 
     /*
      * PB0：按键输入，上拉，双边沿中断
-     *
      * 未按下 = 1
      * 按下   = 0
      */
     GPIO_InitStruct.Pin = KEY_PIN;
     GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
-    GPIO_InitStruct.Pull = GPIO_PULLUP;
+    GPIO_InitStruct.Pull = GPIO_PULLDOWN;
     HAL_GPIO_Init(KEY_PORT, &GPIO_InitStruct);
 
     /*
@@ -179,9 +172,6 @@ void ClawStar_GPIO_Init(void)
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
     HAL_GPIO_Init(BL_PWR_CTRL_PORT, &GPIO_InitStruct);
 
-    /*
-     * PB0 对应 EXTI0，一般走 EXTI0_1_IRQn
-     */
-    HAL_NVIC_SetPriority(EXTI0_1_IRQn, 2, 0);
     HAL_NVIC_EnableIRQ(EXTI0_1_IRQn);
+    HAL_NVIC_SetPriority(EXTI0_1_IRQn, 0, 0);
 }

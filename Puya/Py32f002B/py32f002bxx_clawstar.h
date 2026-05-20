@@ -15,7 +15,7 @@ extern "C" {
  */
 #define KEY_PORT              GPIOB
 #define KEY_PIN               GPIO_PIN_0
-#define KEY_PRESSED_LEVEL     GPIO_PIN_RESET
+#define KEY_PRESSED_LEVEL     GPIO_PIN_SET
 
 /*
  * PB1：系统电源控制
@@ -36,8 +36,8 @@ extern "C" {
 /*
  * 按键参数
  */
-#define LONG_PRESS_TIME_MS    3000U
-#define DEBOUNCE_TIME_MS      10U
+#define LONG_PRESS_TIME_MS    1500U
+#define DEBOUNCE_TIME_MS      5U
 
 typedef enum {
     KEY_IDLE = 0,
