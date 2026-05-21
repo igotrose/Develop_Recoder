@@ -1,3 +1,5 @@
 # Ignore all exe files
 # Ignore Dir
 .vscode
+
+*.bmodel
