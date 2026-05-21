@@ -3,6 +3,16 @@
 ### SDcard 升级
 SDCard 升级需要将SD卡格式化为`FAT32`格式，大小1GB以上，刷机包一般都在`<SDK>/install`目录下，将下载到的`sdcard.tgz`解压到SD卡根目录下面，将设备断电，插入SD卡并连接串口终端，自动进入刷机流程，结束后会看到拔掉SD卡并重启设备的提示，依照操作执行就好了
 ### USB 升级
+USB 升级需要设备的 USB 属于从机模式，PC 端需要驱动[CviUsbInstallDriver.exe](CviUsbInstallDriver.exe)，安装一次即可
+```
+usb update 目录结构
+|
+|------ cv_dl_magic.bin
+|------ CviUsbInstallDriver.exe   // PC 烧录驱动
+|------ usb_dl.exe                // 烧录工具
+|------ fw                        // 固件位置
+```
+设备关机状态下，打开 cmd 或者 powershell ，执行 `.\usb_dl.exe -c cv186x -i ./fw/`，然后开机就可以等待烧录完成
 ### TFTP 升级
 首先Window或者Linux系统安装TFTP服务
 - Window下，需要下载tftp工具`https://pjo2.github.io/tftpd64/`
