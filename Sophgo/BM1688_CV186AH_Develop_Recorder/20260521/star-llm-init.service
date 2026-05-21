@@ -1,0 +1,15 @@
+[Unit]
+Description=Initialize Star LLM Python Environment
+After=network-online.target usb_gadget_init.service
+Wants=network-online.target
+Requires=usb_gadget_init.service
+Before=star-llm.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/star_llm_init.sh
+RemainAfterExit=yes
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

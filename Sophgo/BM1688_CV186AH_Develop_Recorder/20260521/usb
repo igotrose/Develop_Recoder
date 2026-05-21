@@ -1,0 +1,13 @@
+# 只监听USB虚拟网卡
+interface=usb0
+# 不加载全局配置
+no-resolv
+no-hosts
+# DHCP地址池（Windows自动获取的IP范围）
+dhcp-range=192.168.188.100,192.168.188.199,255.255.255.0,24h
+# 🔥 核心：不下发默认网关（关键！）
+dhcp-option=3
+# 🔥 核心：不下发DNS（关键！）
+dhcp-option=6
+# 关闭路由广播
+no-negcache

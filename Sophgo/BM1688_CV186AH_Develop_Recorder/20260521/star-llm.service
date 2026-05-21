@@ -1,0 +1,22 @@
+[Unit]
+Description=Star LLM API Server
+After=network-online.target usb_gadget_init.service star-llm-init.service
+Wants=network-online.target
+Requires=usb_gadget_init.service star-llm-init.service
+ConditionPathExists=/opt/tunstar/star-llm/star-llm-env/bin/python3
+ConditionPathExists=/opt/tunstar/star-llm/api_server.py
+ 
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/tunstar/star-llm
+EnvironmentFile=/opt/tunstar/star-llm/.env
+ExecStart=/opt/tunstar/star-llm/star-llm-env/bin/python3 /opt/tunstar/star-llm/api_server.py -m $MODEL_PATH -c /opt/tunstar/star-llm/config
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

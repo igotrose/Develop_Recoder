@@ -1,0 +1,94 @@
+From a2a33f6b21f2316a5ad1eedcbcdb74ab9f81026b Mon Sep 17 00:00:00 2001
+From: qiupeiqin <qiupeiqin@cs-t.cn>
+Date: Thu, 21 May 2026 01:59:09 +0000
+Subject: [PATCH] Integrate clawstar application
+
+Change-Id: I8206f9683017808313c458d35e1e6eb0d15a601c
+---
+ envsetup_soc.sh          | 40 ++++++++++++++++++++++++++++++++++++++++
+ scripts/partition32G.xml |  4 ++--
+ 2 files changed, 42 insertions(+), 2 deletions(-)
+
+diff --git a/envsetup_soc.sh b/envsetup_soc.sh
+index 01a5cd1..e2bd8ad 100755
+--- a/envsetup_soc.sh
++++ b/envsetup_soc.sh
+@@ -651,6 +651,18 @@ function build_edge_ubuntu
+   find "${SDK_DEBS}" -maxdepth 1 -type f -exec sudo cp -f {} "${EDGE_ROOTFS_DIR}"/home/linaro/debs \;
+   find "${MOD_DEBS}" -maxdepth 1 -type f -exec sudo cp -f {} "${EDGE_ROOTFS_DIR}"/home/linaro/debs \;
+ 
++  # ensure DNS works inside chroot
++  if [ -f /etc/resolv.conf ]; then
++    sudo cp -Lf /etc/resolv.conf "${EDGE_ROOTFS_DIR}/etc/resolv.conf"
++  fi
++
++  # optional: avoid IPv6/connect timeout issues in some networks
++  sudo mkdir -p "${EDGE_ROOTFS_DIR}/etc/apt/apt.conf.d"
++  cat <<'EOF' | sudo tee "${EDGE_ROOTFS_DIR}/etc/apt/apt.conf.d/99network" >/dev/null
++Acquire::ForceIPv4 "true";
++Acquire::Retries "3";
++EOF
++
+   echo install packages...
+ sudo chroot "${EDGE_ROOTFS_DIR}" /bin/bash << EOT
+ #!/bin/bash
+@@ -658,6 +670,29 @@ sudo chroot "${EDGE_ROOTFS_DIR}" /bin/bash << EOT
+ echo -e "LC_ALL=C.UTF-8\n" > /etc/default/locale
+ echo "Defaults timestamp_timeout=43200" | tee -a /etc/sudoers
+ 
++# switch Ubuntu ARM sources from ports.ubuntu.com to Aliyun mirror
++if [ -f /etc/apt/sources.list ]; then
++  sed -i 's|http://ports.ubuntu.com/ubuntu-ports|https://mirrors.aliyun.com/ubuntu-ports|g' /etc/apt/sources.list
++fi
++if [ -d /etc/apt/sources.list.d ]; then
++  find /etc/apt/sources.list.d -type f \( -name "*.list" -o -name "*.sources" \) \
++    -exec sed -i 's|http://ports.ubuntu.com/ubuntu-ports|https://mirrors.aliyun.com/ubuntu-ports|g' {} \;
++fi
++
++# refresh apt index after mirror switch
++apt-get clean
++rm -rf /var/lib/apt/lists/*
++
++# preinstall packages in chroot stage
++export DEBIAN_FRONTEND=noninteractive
++apt-get update
++apt-get install -y --no-install-recommends \
++  dnsmasq curl ca-certificates 
++
++# install uv to system path in rootfs 
++curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
++uv --version
++
+ for deb_dir in /debs /home/linaro/debs; do
+   if [  -d \${deb_dir} ] && [ \$(ls \${deb_dir}/*.deb | wc -l) -gt 0 ]; then
+     retries=0
+@@ -1332,6 +1367,11 @@ function build_package()
+ 
+     sudo mkdir -p rootfs_rw/overlay/opt
+     sudo mv "${EDGE_ROOTFS_DIR}"/opt/sophon rootfs_rw/overlay/opt/
++
++    sudo mkdir -p rootfs_rw/overlay/opt/tunstar
++    sudo cp -a "${TOP_DIR}/ubuntu/bootloader-arm64/third-part/star-llm" \
++      rootfs_rw/overlay/opt/tunstar/
++      
+     sudo tar -zcf .rootfs_rw.tgz -C rootfs_rw .
+     sudo mv .rootfs_rw.tgz "${EDGE_ROOTFS_DIR}"/root/
+     sudo tar -zcf rootfs.tgz --exclude=home/linaro/bsp-debs -C "${EDGE_ROOTFS_DIR}" .
+diff --git a/scripts/partition32G.xml b/scripts/partition32G.xml
+index 94e05e7..37a6eea 100755
+--- a/scripts/partition32G.xml
++++ b/scripts/partition32G.xml
+@@ -2,8 +2,8 @@
+ 	<partition label="BOOT"       size_in_kb="131072"  readonly="false"  format="1" />
+ 	<partition label="RECOVERY"   size_in_kb="131072"  readonly="false"  format="2" />
+ 	<partition label="MISC"       size_in_kb="10240"   readonly="false"  format="0" />
+-	<partition label="ROOTFS"     size_in_kb="3145728" readonly="true"   format="2" />
+-	<partition label="ROOTFS_RW"  size_in_kb="9291456" readonly="false"  format="2" />
++	<partition label="ROOTFS"     size_in_kb="6924056" readonly="true"   format="2" />
++	<partition label="ROOTFS_RW"  size_in_kb="5513128" readonly="false"  format="2" />
+ 	<partition label="MSC"        size_in_kb="8388608" readonly="false"  format="1" />
+ 	<partition label="DATA"       size_in_kb="4194304" readonly="false"  format="2" />
+ </physical_partition>
+-- 
+2.34.1
+
