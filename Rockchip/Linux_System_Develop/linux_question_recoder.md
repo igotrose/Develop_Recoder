@@ -1830,11 +1830,5 @@ cat /proc/device-tree/model
 sudo -s
 apt update 
 apt install device-tree-compiler
-
-mkdir ~/dtb_dump
-cd ~/dtb_dump
-
-cp /sys/firmware/fdt running.dtb
-
-dtc -I dtb -O dts -o running.dts running.dtb
+dtc -I fs -O dts /proc/device-tree > /tmp/running.dts
 ```
