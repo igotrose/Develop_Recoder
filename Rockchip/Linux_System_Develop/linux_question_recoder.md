@@ -751,7 +751,7 @@ echo "-- Done."
     Pcie有五个控制节点，关联4个phy通道，根据原理图，使用的是pcie2通道mux1，需要配置pcie2x1l0，Gmac网口部分查看上述
     ![alt text](20251023/pcie_document.png)
     ```dts
-    &combphy0_ps {
+    &combphy1_ps {
         status = "okay";
     };
     &pcie2x1l0 {
@@ -1818,3 +1818,23 @@ RK3588的USB控制器包括2个`USB2.0HOST`控制、2个`USB3.1OTG`控制、1个
    - `quectel-CM` → `<SDK>/debian/overlay-firmware/usr/share/quectel/quectel-CM`
    - 启动配置脚本 `quectel` → `<SDK>/debian/overlay/usr/bin/quectel`
    - systemd 服务文件 → `<SDK>/debian/overlay/lib/systemd/system/quectel.service`
+## 2026-05-22
+### RK 反汇编设备树
+1. 查看当前内核使用的设备树目录，查看设备树根节点
+```bash
+ls /proc/device-tree 
+cat /proc/device-tree/model
+```
+2. 导出当前正在使用的DTB
+```bash 
+sudo -s
+apt update 
+apt install device-tree-compiler
+
+mkdir ~/dtb_dump
+cd ~/dtb_dump
+
+cp /sys/firmware/fdt running.dtb
+
+dtc -I dtb -O dts -o running.dts running.dtb
+```
