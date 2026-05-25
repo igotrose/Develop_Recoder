@@ -1621,9 +1621,7 @@ RK3588的USB控制器包括2个`USB2.0HOST`控制、2个`USB3.1OTG`控制、1个
 ![alt text](20251204/usb_controller_pins.png)
 ### USB调试
 - 参考文档
-    ```
-    《Rockchip_RK3588_Developer_Guide_USB_CN.pdf》
-    ```
+    [Rockchip_RK3588_Developer_Guide_USB_CN.pdf](20251204\Rockchip_Developer_Guide_USB_CN.pdf)
 - 原理图    
     ![alt text](20251204/rk3588_usb_controller.png)
     ```
@@ -1764,9 +1762,7 @@ RK3588的USB控制器包括2个`USB2.0HOST`控制、2个`USB3.1OTG`控制、1个
 ## 2025-12-05
 ### sata 接口
 - 参考文档
-    ```
-    《Rockchip_Developer_Guide_PCIe_CN.pdf》
-    ```
+    [Rockchip_Developer_Guide_PCIe_CN.pdf](20251205\Rockchip_Developer_Guide_PCIe_CN.pdf)
 - 原理图
     ![alt text](20251205/pcie20_sata.png)
     ![alt text](20251205/sata_interface.png)
@@ -1787,10 +1783,8 @@ RK3588的USB控制器包括2个`USB2.0HOST`控制、2个`USB3.1OTG`控制、1个
         ```
 ### 4G/5G模块
 - 参考文档
-    ``` 
-    《Quectel_QConnectManager_Linux_用户指导_V1.0.pdf》
-    《Quectel_UMTS_LTE_5G_Linux_USB_Driver_用户指导_V1.2.pdf》
-    ```
+    [Quectel_QConnectManager_Linux_用户指导_V1.0.pdf](20251205/Quectel_QConnectManager_Linux_用户指导_V1.0.pdf)
+    [Quectel_UMTS_LTE_5G_Linux_USB_Driver_用户指导_V1.2.pdf](20251205/Quectel_UMTS_LTE_5G_Linux_USB_Driver_用户指导_V1.2.pdf)
 - 原理图
     ![alt text](20251205/4_5G_sim.png)
 1. `dts` 设备树配置部分
@@ -1837,4 +1831,4 @@ dtc -I fs -O dts /proc/device-tree > /tmp/running.dts
 ## 2026-05-25
 ### PCIE 接 1684X 调试（未完）
 
-### USB 接口调试
+### USB 接口解析
