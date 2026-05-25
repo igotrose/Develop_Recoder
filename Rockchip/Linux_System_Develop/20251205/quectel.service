@@ -3,10 +3,10 @@ Description=Setup Quectel 4/5G Module
 After=multi-user.target
 
 [Service]
-Type=oneshot
-ExecStart=/usr/bin/quectel
+ExecStart=/usr/bin/quectel start
+ExecStop=/usr/bin/quectel stop
+ExecReload=/usr/bin/quectel restart
 RemainAfterExit=yes
-TimeoutSec=60
 
 [Install]
 WantedBy=multi-user.target

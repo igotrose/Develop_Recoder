@@ -22,7 +22,7 @@ wait_for_device() {
     log "Waiting for device $DEVICE to be ready..."
     local counter=0
 
-    while [ ! -c "$DEVICE"] && [ $counter -lt $TIMEOUT ]; do
+    while [ ! -c "$DEVICE" ] && [ $counter -lt $TIMEOUT ]; do
         sleep 1
         counter=$((counter+1))
     done

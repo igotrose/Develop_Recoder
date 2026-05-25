@@ -859,6 +859,7 @@ echo "-- Done."
             pinctrl-names = "default";
             pinctrl-0 = <&wifi_host_wake_irq>;
             WIFI,host_wake_irq = <&gpio0 RK_PB2 GPIO_ACTIVE_HIGH>;
+            WIFI,poweren_gpio = <&gpio0 RK_PC4 GPIO_ACTIVE_HIGH>;
             status = "okay";
         };
 
@@ -895,6 +896,7 @@ echo "-- Done."
             };
         };
     };
+
     &sdio {
         max-frequency = <150000000>;
         no-sd;
@@ -926,7 +928,7 @@ echo "-- Done."
     CONFIG_BCMDHD_SDIO=y
     ```
 3. 重新编译，烧录查看日志
-4. 功能验证，由于ubuntu-base生成的跟文件系统独立于SDK，所以需要手动挂载安装设备
+4. 功能验证，由于ubuntu-base生成的根文件系统独立于SDK，所以需要手动挂载安装设备
     - 创建目录`/lib/firmware`放置驱动固件，项目使用的是`ap6398S`，对应固件的位置位于`<SDK>/external/rkwifibt/firmware/broadcom/AP6398S`
         ```bash
         sudo mkdir -p /lib/firmware/brcm
@@ -964,7 +966,7 @@ echo "-- Done."
     - 检测wifi
         - 查看是否有wlan接口
             ```bash
-            # AP6398S带有双模wifi，wlan0是AP模式用于连接wifi，wlan1是STA模式用于热点
+            # AP6398S带有双模wifi，wlan0是AP模式用于热点，wlan1是STA模式连接路由器
             ip link show 
             ```
         - 断开清空原有连接
@@ -1832,3 +1834,7 @@ apt update
 apt install device-tree-compiler
 dtc -I fs -O dts /proc/device-tree > /tmp/running.dts
 ```
+## 2026-05-25
+### PCIE 接 1684X 调试（未完）
+
+### USB 接口调试
