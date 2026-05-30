@@ -1,0 +1,323 @@
+diff --git a/common/scripts/mk-all.sh b/common/scripts/mk-all.sh
+index 1deaf5a..5d72755 100755
+--- a/common/scripts/mk-all.sh
++++ b/common/scripts/mk-all.sh
+@@ -28,7 +28,7 @@ build_all()
+ 	"$RK_SCRIPTS_DIR/mk-firmware.sh"
+ 
+ 	[ -z "$RK_KERNEL" ] || \
+-		"$RK_SCRIPTS_DIR/mk-kernel.sh" linux-headers "$RK_FIRMWARE_DIR"
++		"$RK_SCRIPTS_DIR/mk-kernel.sh" linux-headers "$RK_OUTDIR/bsp-debs"
+ 
+ 	finish_build
+ }
+@@ -63,9 +63,8 @@ build_release()
+ 		mkdir -p "$RELEASE_DIR/kernel"
+ 
+ 		message "Saving linux-headers..."
+-		ln -rvsf "$RELEASE_DIR/IMAGES/linux-headers.tar" \
+-			"$RELEASE_DIR/kernel/"
+-
++		cp -v "$RELEASE_DIR/IMAGES"/linux-headers-*.deb \
++			"$RELEASE_DIR/kernel/" || true
+ 		message "Saving kernel files..."
+ 		cp -v kernel/.config kernel/System.map kernel/vmlinux \
+ 			$RK_KERNEL_DTB "$RELEASE_DIR/kernel"
+diff --git a/common/scripts/mk-kernel.sh b/common/scripts/mk-kernel.sh
+index 79d7219..5eeb5fc 100755
+--- a/common/scripts/mk-kernel.sh
++++ b/common/scripts/mk-kernel.sh
+@@ -163,7 +163,7 @@ clean_hook()
+ 	[ ! -d kernel ] || make -C kernel distclean
+ 
+ 	rm -rf "$RK_OUTDIR/recovery-*"
+-	rm -f "$RK_FIRMWARE_DIR/linux-headers.tar"
++	rm -f "$RK_OUTDIR"/bsp-debs/linux-headers-*.deb
+ 	rm -rf "$RK_FIRMWARE_DIR/boot.img"
+ }
+ 
+@@ -270,53 +270,140 @@ post_build_hook()
+ 	shift
+ 
+ 	[ "$1" != cmds ] || shift
+-	OUTPUT_FILE="${1:-"$RK_OUTDIR"}/linux-headers.tar"
+-	mkdir -p "$(dirname "OUTPUT_DIR")"
++	OUTPUT_DIR="${1:-"$RK_OUTDIR/bsp-debs"}"
++	mkdir -p "$OUTPUT_DIR"
+ 
+ 	HEADER_FILES_SCRIPT=$(mktemp)
++	HEADER_TAR=$(mktemp --suffix=.tar)
++	HEADER_PKG_ROOT=$(mktemp -d)
++	trap 'rm -f "$HEADER_FILES_SCRIPT" "$HEADER_TAR"; rm -rf "$HEADER_PKG_ROOT"' EXIT
++
++	run_command $KMAKE $RK_KERNEL_CFG $RK_KERNEL_CFG_FRAGMENTS
++	run_command $KMAKE modules_prepare
++	run_command $KMAKE $RK_KERNEL_IMG_NAME
++
++	KERNEL_RELEASE=$(cat "$RK_SDK_DIR/kernel/include/config/kernel.release")
++	HEADER_PKG_NAME="linux-headers-$KERNEL_RELEASE"
++	HEADER_DST="$HEADER_PKG_ROOT/usr/src/$HEADER_PKG_NAME"
++	case "$RK_KERNEL_ARCH" in
++		arm) DEB_ARCH=armhf ;;
++		arm64) DEB_ARCH=arm64 ;;
++		*) DEB_ARCH="$RK_KERNEL_ARCH" ;;
++	esac
++	OUTPUT_DEB="$OUTPUT_DIR/${HEADER_PKG_NAME}_${KERNEL_RELEASE}-1_${DEB_ARCH}.deb"
+ 
+ 	if [ "$DRY_RUN" ]; then
+ 		notice "Commands of building linux-headers:"
+ 	else
+-		notice "Saving linux-headers to $OUTPUT_FILE"
++		notice "Saving linux-headers to $OUTPUT_DEB"
+ 	fi
+ 
+-	run_command $KMAKE $RK_KERNEL_CFG $RK_KERNEL_CFG_FRAGMENTS
+-	run_command $KMAKE $RK_KERNEL_IMG_NAME
+ 
+ 	cat << EOF > "$HEADER_FILES_SCRIPT"
+ {
+ 	# Based on kernel/scripts/package/builddeb
+ 	find . arch/$RK_KERNEL_ARCH -maxdepth 1 -name Makefile\*
+ 	find include -type f -o -type l
+-	find arch/$RK_KERNEL_ARCH -name module.lds -o -name Kbuild.platforms -o -name Platform
++	find scripts -type f -o -type l
++	if [ -d tools/objtool ]; then
++		find tools/objtool -type f -o -type l
++	fi
++	find arch/$RK_KERNEL_ARCH -name Kbuild.platforms -o -name Platform
+ 	find \$(find arch/$RK_KERNEL_ARCH -name include -o -name scripts -type d) -type f
+-	find arch/$RK_KERNEL_ARCH/include Module.symvers -type f
++	find arch/$RK_KERNEL_ARCH/include Module.symvers System.map -type f
+ 	echo .config
++	echo scripts/module.lds
++	echo scripts/module.lds.S
++	echo scripts/Makefile
++	echo scripts/basic/Makefile
+ } | tar --no-recursion --ignore-failed-read -T - \
+-	-cf "$OUTPUT_FILE"
++	-cf "$HEADER_TAR"
+ EOF
+ 
+ 	run_command cd "$RK_SDK_DIR/kernel"
+ 
+-	cat "$HEADER_FILES_SCRIPT"
+-
+ 	if [ -z "$DRY_RUN" ]; then
+ 		. "$HEADER_FILES_SCRIPT"
+ 	fi
+ 
+-	case "$RK_KERNEL_KBUILD_ARCH" in
+-		host) run_command tar -uf "$OUTPUT_FILE" scripts tools ;;
+-		*)
+-			run_command cd "$RK_KBUILD_DIR/$RK_KERNEL_KBUILD_ARCH"
+-			run_command cd "linux-kbuild-$RK_KERNEL_VERSION_REAL"
+-			run_command tar -uf "$OUTPUT_FILE" .
+-			;;
+-	esac
++	mkdir -p "$HEADER_DST"
++	tar -xf "$HEADER_TAR" -C "$HEADER_DST"
++
++	KBUILD_DIR=
++	for d in \
++		"$RK_KBUILD_DIR/$RK_KERNEL_KBUILD_ARCH/linux-kbuild-$RK_KERNEL_VERSION_REAL" \
++		"$RK_KBUILD_DIR/$RK_KERNEL_ARCH/linux-kbuild-$RK_KERNEL_VERSION_REAL" \
++		"$RK_KBUILD_DIR/aarch64/linux-kbuild-$RK_KERNEL_VERSION_REAL" \
++		"$RK_KBUILD_DIR/$RK_KERNEL_ARCH/linux-kbuild-$(echo "$RK_KERNEL_VERSION_REAL" | cut -d. -f1,2)" \
++		"$RK_KBUILD_DIR/aarch64/linux-kbuild-$(echo "$RK_KERNEL_VERSION_REAL" | cut -d. -f1,2)"
++	do
++		if [ -d "$d" ]; then
++			KBUILD_DIR="$d"
++			break
++		fi
++	done
++
++	if [ -n "$KBUILD_DIR" ]; then
++		notice "Overlay target kbuild from $KBUILD_DIR"
++		mkdir -p "$HEADER_DST/scripts"
++		cp -a "$KBUILD_DIR/scripts/." "$HEADER_DST/scripts/"
++		if [ -d "$KBUILD_DIR/tools" ]; then
++			mkdir -p "$HEADER_DST/tools"
++			cp -a "$KBUILD_DIR/tools/." "$HEADER_DST/tools/"
++		fi
++	else
++		notice "No target kbuild dir found, keep in-tree scripts/tools"
++	fi
+ 
+-	run_command cd "$RK_SDK_DIR"
++	if [ ! -f "$HEADER_DST/scripts/module.lds" ]; then
++		error "module.lds was not packaged into headers"
++		exit 1
++	fi
+ 
+-	rm -f "$HEADER_FILES_SCRIPT"
++	if [ ! -f "$HEADER_DST/scripts/basic/fixdep" ]; then
++		error "Missing fixdep in headers package"
++		exit 1
++	fi
++
++	if [ ! -f "$HEADER_DST/scripts/mod/modpost" ]; then
++		error "Missing modpost in headers package"
++		exit 1
++	fi
++
++	if ! file "$HEADER_DST/scripts/basic/fixdep" | grep -Eq 'ARM aarch64|ARM64|AArch64'; then
++		error "fixdep is not an arm64/aarch64 binary"
++		file "$HEADER_DST/scripts/basic/fixdep" || true
++		exit 1
++	fi
++
++	if ! file "$HEADER_DST/scripts/mod/modpost" | grep -Eq 'ARM aarch64|ARM64|AArch64'; then
++		error "modpost is not an arm64/aarch64 binary"
++		file "$HEADER_DST/scripts/mod/modpost" || true
++		exit 1
++	fi
++
++	mkdir -p \
++		"$HEADER_PKG_ROOT/DEBIAN" \
++		"$HEADER_PKG_ROOT/lib/modules/$KERNEL_RELEASE"
++
++	ln -snf "/usr/src/$HEADER_PKG_NAME" \
++		"$HEADER_PKG_ROOT/lib/modules/$KERNEL_RELEASE/build"
++	ln -snf "/usr/src/$HEADER_PKG_NAME" \
++		"$HEADER_PKG_ROOT/lib/modules/$KERNEL_RELEASE/source"
++
++	cat << EOF > "$HEADER_PKG_ROOT/DEBIAN/control"
++Package: $HEADER_PKG_NAME
++Version: ${KERNEL_RELEASE}-1
++Section: devel
++Priority: optional
++Architecture: $DEB_ARCH
++Maintainer: Rockchip
++Description: Linux kernel headers for $KERNEL_RELEASE
++EOF
++
++	if [ -z "$DRY_RUN" ]; then
++		dpkg-deb -Zgzip --build "$HEADER_PKG_ROOT" "$OUTPUT_DEB"
++	fi
+ }
+ 
+ post_build_hook_dry()
+diff --git a/common/scripts/post-wifibt.sh b/common/scripts/post-wifibt.sh
+index 48b5b4e..34b2d77 100755
+--- a/common/scripts/post-wifibt.sh
++++ b/common/scripts/post-wifibt.sh
+@@ -254,8 +254,30 @@ build_wifibt()
+ 		fi
+ 	fi
+ 
++	KERNEL_MODULES_DIR=
++	for d in "$TARGET_DIR/lib/modules"/*; do
++		[ -d "$d" ] || continue
++		KERNEL_MODULES_DIR="$d"
++		break
++	done
++
++	if [ -n "$KERNEL_MODULES_DIR" ]; then
++		MODULES_DST="$KERNEL_MODULES_DIR/extra/rkwifibt"
++	else
++		MODULES_DST="$TARGET_DIR/lib/modules"
++		notice "No versioned kernel modules tree found, fallback to $MODULES_DST"
++	fi
++
+ 	mkdir -p $TARGET_DIR/etc/ $TARGET_DIR/usr/bin/ \
+-		$TARGET_DIR/lib/modules/ $TARGET_DIR/lib/firmware/rtlbt/
++		$TARGET_DIR/lib/modules/ $TARGET_DIR/lib/firmware/rtlbt/ \
++		$MODULES_DST
++	
++	install_module()
++	{
++		local src="$1"
++		[ -e "$src" ] || return 0
++		cp "$src" "$MODULES_DST/"
++	}
+ 
+ 	echo "create Android stype dirs"
+ 	rm -rf "$TARGET_DIR/system"
+@@ -279,7 +301,7 @@ build_wifibt()
+ 	if [[ "$RK_WIFIBT_CHIP" = "ALL_CY" ]];then
+ 		echo "copy infineon/realtek firmware/nvram to rootfs"
+ 		cp $RKWIFIBT_DIR/drivers/infineon/*.ko \
+-			$TARGET_DIR/lib/modules/ || true
++			$MODULES_DST/ || true
+ 		cp $RKWIFIBT_DIR/firmware/infineon/*/* \
+ 			$TARGET_DIR/lib/firmware/ || true
+ 
+@@ -288,18 +310,18 @@ build_wifibt()
+ 			cp $RKWIFIBT_DIR/firmware/realtek/*/* $TARGET_DIR/lib/firmware/
+ 			cp $RKWIFIBT_DIR/firmware/realtek/*/* \
+ 				$TARGET_DIR/lib/firmware/rtlbt/
+-			cp $RKWIFIBT_DIR/drivers/bluetooth_uart_driver/hci_uart.ko \
+-				$TARGET_DIR/lib/modules/
++			install_module \
++				$RKWIFIBT_DIR/drivers/bluetooth_uart_driver/hci_uart.ko
+ 			if [ -n "$WIFI_USB" ]; then
+-				cp $RKWIFIBT_DIR/drivers/bluetooth_usb_driver/rtk_btusb.ko \
+-					$TARGET_DIR/lib/modules/
++				install_module \
++					$RKWIFIBT_DIR/drivers/bluetooth_usb_driver/rtk_btusb.ko
+ 			fi
+ 		fi
+ 	fi
+ 
+ 	if [[ "$RK_WIFIBT_CHIP" = "ALL_AP" ]];then
+ 		echo "copy ap6xxx firmware/nvram to rootfs"
+-		cp $RKWIFIBT_DIR/drivers/bcmdhd/*.ko $TARGET_DIR/lib/modules/
++		cp $RKWIFIBT_DIR/drivers/bcmdhd/*.ko $MODULES_DST/
+ 		cp $RKWIFIBT_DIR/firmware/broadcom/*/wifi/* \
+ 			$TARGET_DIR/lib/firmware/ || true
+ 		cp $RKWIFIBT_DIR/firmware/broadcom/*/bt/* \
+@@ -308,15 +330,15 @@ build_wifibt()
+ 		#reatek
+ 		if ! [[ "$RK_KERNEL_VERSION" = "6.1" ]];then
+ 			echo "copy realtek firmware/nvram to rootfs"
+-			cp $RKWIFIBT_DIR/drivers/rtl*/*.ko $TARGET_DIR/lib/modules/
++			cp $RKWIFIBT_DIR/drivers/rtl*/*.ko $MODULES_DST/
+ 			cp -rf $RKWIFIBT_DIR/firmware/realtek/*/* $TARGET_DIR/lib/firmware/
+ 			cp -rf $RKWIFIBT_DIR/firmware/realtek/*/* \
+ 				$TARGET_DIR/lib/firmware/rtlbt/
+-			cp $RKWIFIBT_DIR/drivers/bluetooth_uart_driver/hci_uart.ko \
+-				$TARGET_DIR/lib/modules/
++			install_module \
++				$RKWIFIBT_DIR/drivers/bluetooth_uart_driver/hci_uart.ko
+ 			if [ -n "$WIFI_USB" ]; then
+-				cp $RKWIFIBT_DIR/drivers/bluetooth_usb_driver/rtk_btusb.ko \
+-					$TARGET_DIR/lib/modules/
++				install_module \
++					$RKWIFIBT_DIR/drivers/bluetooth_usb_driver/rtk_btusb.ko 
+ 			fi
+ 		fi
+ 	fi
+@@ -335,7 +357,7 @@ build_wifibt()
+ 		WIFI_KO_DIR=$(echo $RK_WIFIBT_CHIP | tr '[A-Z]' '[a-z]')
+ 
+ 		cp $RKWIFIBT_DIR/drivers/$WIFI_KO_DIR/*.ko \
+-			$TARGET_DIR/lib/modules/
++			$MODULES_DST/
+ 	fi
+ 
+ 	if [[ "$RK_WIFIBT_CHIP" =~ "CYW" ]];then
+@@ -343,7 +365,7 @@ build_wifibt()
+ 		cp $RKWIFIBT_DIR/firmware/infineon/$RK_WIFIBT_CHIP/* \
+ 			$TARGET_DIR/lib/firmware/
+ 		cp $RKWIFIBT_DIR/drivers/infineon/*.ko \
+-			$TARGET_DIR/lib/modules/
++			$MODULES_DST/
+ 	fi
+ 
+ 	if [[ "$RK_WIFIBT_CHIP" =~ "AP6" ]];then
+@@ -352,7 +374,14 @@ build_wifibt()
+ 			$TARGET_DIR/lib/firmware/
+ 		cp $RKWIFIBT_DIR/firmware/broadcom/$RK_WIFIBT_CHIP/bt/* \
+ 			$TARGET_DIR/lib/firmware/
+-		cp $RKWIFIBT_DIR/drivers/bcmdhd/*.ko $TARGET_DIR/lib/modules/
++		cp $RKWIFIBT_DIR/drivers/bcmdhd/*.ko $MODULES_DST/
++	fi
++
++	if [ -n "$KERNEL_MODULES_DIR" ] && command -v depmod >/dev/null 2>&1; then
++		KERNEL_RELEASE="${KERNEL_MODULES_DIR##*/}"
++		message "Running depmod for $KERNEL_RELEASE..."
++		depmod -b "$TARGET_DIR" "$KERNEL_RELEASE" || \
++			notice "depmod failed for $KERNEL_RELEASE"
+ 	fi
+ 
+ 	# Install boot services

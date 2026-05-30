@@ -1,0 +1,214 @@
+diff --git a/mk-rootfs-bullseye.sh b/mk-rootfs-bullseye.sh
+index ba1efbd..307974b 100644
+--- a/mk-rootfs-bullseye.sh
++++ b/mk-rootfs-bullseye.sh
+@@ -3,12 +3,20 @@
+ # Directory contains the target rootfs
+ TARGET_ROOTFS_DIR="binary"
+ 
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++SDK_TOP_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
++KERNEL_DEB_DIR="$SDK_TOP_DIR/output/bsp-debs"
++KERNEL_HEADERS_DEB_DIR="$SDK_TOP_DIR/rockdev"
++# kernel image + headers debs are both stored here
++
+ case "${ARCH:-$1}" in
+ 	arm|arm32|armhf)
+ 		ARCH=armhf
++		KBUILD_ARCH=armhf
+ 		;;
+ 	*)
+ 		ARCH=arm64
++		KBUILD_ARCH=aarch64
+ 		;;
+ esac
+ 
+@@ -20,6 +28,10 @@ fi
+ 
+ echo -e "\033[36m Building for $VERSION \033[0m"
+ 
++DEBIAN_MIRROR="${DEBIAN_MIRROR:-http://mirrors.ustc.edu.cn/debian/}"
++DEBIAN_BACKPORTS_MIRROR="${DEBIAN_BACKPORTS_MIRROR:-$DEBIAN_MIRROR}"
++ENABLE_BULLSEYE_BACKPORTS="${ENABLE_BULLSEYE_BACKPORTS:-false}"
++
+ if [ ! -e linaro-bullseye-alip-*.tar.gz ]; then
+ 	echo "\033[36m Run mk-base-debian.sh first \033[0m"
+ 	exit -1
+@@ -32,6 +44,39 @@ sudo tar -xpf linaro-bullseye-alip-*.tar.gz
+ sudo mkdir -p $TARGET_ROOTFS_DIR/packages
+ sudo cp -rpf packages/$ARCH/* $TARGET_ROOTFS_DIR/packages
+ 
++# kernel image deb package
++if [ -d "$KERNEL_DEB_DIR" ]; then
++	sudo mkdir -p "$TARGET_ROOTFS_DIR/packages/kernel"
++	for pkg in "$KERNEL_DEB_DIR"/linux-image-*.deb; do
++		[ -e "$pkg" ] || continue
++		case "$pkg" in
++			*-dbg_*.deb) continue ;;
++		esac
++		sudo cp -av "$pkg" "$TARGET_ROOTFS_DIR/packages/kernel/"
++	done
++
++	for pkg in "$KERNEL_DEB_DIR"/linux-headers-*.deb; do
++		[ -e "$pkg" ] || continue
++		case "$pkg" in
++			*-dbg_*.deb) continue ;;
++		esac
++		sudo cp -av "$pkg" "$TARGET_ROOTFS_DIR/packages/kernel/"
++	done
++fi
++
++# keep a copy of bsp debs in target user's home
++if [ -d "$KERNEL_DEB_DIR" ]; then
++	sudo mkdir -p "$TARGET_ROOTFS_DIR/home/linaro/bsp-debs"
++	sudo find "$TARGET_ROOTFS_DIR/home/linaro/bsp-debs" -mindepth 1 -maxdepth 1 -exec rm -rf {} \;
++	sudo cp -av "$KERNEL_DEB_DIR"/linux-*.deb "$TARGET_ROOTFS_DIR/home/linaro/bsp-debs/" 2>/dev/null || true
++fi
++
++if [ -d "packages/$ARCH/sophon" ]; then
++	sudo mkdir -p "$TARGET_ROOTFS_DIR/home/linaro/bsp-debs/sophon"
++	sudo find "$TARGET_ROOTFS_DIR/home/linaro/bsp-debs/sophon" -mindepth 1 -maxdepth 1 -exec rm -rf {} \;
++	sudo cp -av packages/$ARCH/sophon/*.deb "$TARGET_ROOTFS_DIR/home/linaro/bsp-debs/sophon/" 2>/dev/null || true
++fi
++
+ # overlay folder
+ sudo cp -rpf overlay/* $TARGET_ROOTFS_DIR/
+ 
+@@ -48,6 +93,14 @@ echo -e "\033[36m Change root.....................\033[0m"
+ 
+ sudo cp -f /etc/resolv.conf $TARGET_ROOTFS_DIR/etc/
+ 
++
++KERNEL_RELEASE_FILE="$SDK_TOP_DIR/kernel/include/config/kernel.release"
++if [ -f "$KERNEL_RELEASE_FILE" ]; then
++	KERNEL_RELEASE="$(cat "$KERNEL_RELEASE_FILE")"
++else
++	KERNEL_RELEASE=""
++fi
++
+ ID=$(stat --format %u $TARGET_ROOTFS_DIR)
+ 
+ cat << EOF | sudo chroot $TARGET_ROOTFS_DIR
+@@ -66,15 +119,54 @@ done
+ 
+ ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+ 
+-echo "deb http://mirrors.ustc.edu.cn/debian/ bullseye-backports main contrib" >> /etc/apt/sources.list
+-echo "deb-src http://mirrors.ustc.edu.cn/debian/ bullseye-backports main contrib" >> /etc/apt/sources.list
+-
+ apt-get update
+-apt-get upgrade -y
++# apt-get upgrade -y
+ apt install --reinstall util-linux
+ 
+ export APT_INSTALL="apt-get install -fy --allow-downgrades"
+ 
++#---------------kernel image--------------
++echo -e "\033[36m Install kernel image.................... \033[0m"
++KERNEL_IMAGE_PKG=
++for pkg in /packages/kernel/linux-image-*.deb; do
++	case "$pkg" in
++		*-dbg_*.deb) continue ;;
++	esac
++	KERNEL_IMAGE_PKG="$pkg"
++	break
++done
++
++if [ -n "$KERNEL_IMAGE_PKG" ]; then
++	echo "Install kernel image package: $KERNEL_IMAGE_PKG"
++	${APT_INSTALL} "$KERNEL_IMAGE_PKG"
++else
++	echo "WARN: no non-dbg linux-image package found in /packages/kernel"
++fi
++
++echo -e "\033[36m Install kernel headers.................... \033[0m"
++KERNEL_HEADERS_PKG=
++for pkg in /packages/kernel/linux-headers-*.deb; do
++	[ -e "$pkg" ] || continue
++	case "$pkg" in
++		*-dbg_*.deb) continue ;;
++	esac
++	KERNEL_HEADERS_PKG="$pkg"
++	break
++done
++
++if [ -n "$KERNEL_HEADERS_PKG" ]; then
++	echo "Install kernel headers package: $KERNEL_HEADERS_PKG"
++	${APT_INSTALL} "$KERNEL_HEADERS_PKG"
++else
++	echo "WARN: no linux-headers package found in /packages/kernel"
++fi
++
++# Common compatibility packages for kernel modules and legacy Python callers.
++\${APT_INSTALL} dkms libncurses5 libtinfo5 python2 build-essential
++if [ -x /usr/bin/python2 ] && [ ! -e /usr/bin/python ]; then
++	ln -sf /usr/bin/python2 /usr/bin/python
++fi
++
+ # enter root username without password
+ sed -i "s~\(^ExecStart=.*\)~# \1\nExecStart=-/bin/sh -c '/bin/bash -l </dev/%I >/dev/%I 2>\&1'~" /usr/lib/systemd/system/serial-getty@.service
+ 
+diff --git a/overlay/etc/init.d/rockchip.sh b/overlay/etc/init.d/rockchip.sh
+index 7164e9c..f7a82cf 100644
+--- a/overlay/etc/init.d/rockchip.sh
++++ b/overlay/etc/init.d/rockchip.sh
+@@ -77,6 +77,38 @@ function update_npu_fw() {
+     /usr/bin/npu_transfer_proxy&
+ }
+ 
++
++install_sophon_packages() {
++    KVER="$(uname -r)"
++    BSP_DIR="/home/linaro/bsp-debs"
++    SOPHON_DIR="$BSP_DIR/sophon"
++    LOG_FILE="/var/log/sophon-firstboot.log"
++    KMOD_DIR="/lib/modules/$KVER"
++
++    {
++        echo "===== $(date) sophon first boot install begin ====="
++        echo "kernel: $KVER"
++
++        if ls "$BSP_DIR"/linux-headers-"$KVER"_*.deb >/dev/null 2>&1; then
++            apt install -fy --allow-downgrades "$BSP_DIR"/linux-headers-"$KVER"_*.deb
++        else
++            echo "WARN: no linux-headers package found for $KVER"
++        fi
++
++        if [ -d "$SOPHON_DIR" ] && ls "$SOPHON_DIR"/*.deb >/dev/null 2>&1; then
++            apt install -fy --allow-downgrades "$SOPHON_DIR"/*.deb
++        else
++            echo "WARN: no sophon debs found in $SOPHON_DIR"
++        fi
++
++        mkdir -p "$KMOD_DIR"
++        touch "$KMOD_DIR/modules.order" "$KMOD_DIR/modules.builtin" "$KMOD_DIR/modules.builtin.modinfo"
++        depmod -a "$KVER" || true
++        modprobe bmsophon || true
++    } >> "$LOG_FILE" 2>&1
++}
++ 
++
+ COMPATIBLE=$(cat /proc/device-tree/compatible)
+ if [[ $COMPATIBLE =~ "rk3288" ]];
+ then
+@@ -127,6 +159,8 @@ then
+     # Force rootfs synced
+     mount -o remount,sync /
+ 
++    install_sophon_packages
++
+     install_packages ${CHIPNAME}
+ 
+     setcap CAP_SYS_ADMIN+ep /usr/bin/gst-launch-1.0
+diff --git a/packages/arm64/sophon/bmsophon.ko b/packages/arm64/sophon/bmsophon.ko
+new file mode 100644
+index 0000000..bffad15
+Binary files /dev/null and b/packages/arm64/sophon/bmsophon.ko differ
+diff --git a/packages/arm64/sophon/sophon-driver_0.5.1-LTS-rk3588fix1_arm64.deb b/packages/arm64/sophon/sophon-driver_0.5.1-LTS-rk3588fix1_arm64.deb
+new file mode 100644
+index 0000000..f414732
+Binary files /dev/null and b/packages/arm64/sophon/sophon-driver_0.5.1-LTS-rk3588fix1_arm64.deb differ
+diff --git a/packages/arm64/sophon/sophon-libsophon_0.5.1-LTS_arm64.deb b/packages/arm64/sophon/sophon-libsophon_0.5.1-LTS_arm64.deb
+new file mode 100644
+index 0000000..6173ed5
+Binary files /dev/null and b/packages/arm64/sophon/sophon-libsophon_0.5.1-LTS_arm64.deb differ

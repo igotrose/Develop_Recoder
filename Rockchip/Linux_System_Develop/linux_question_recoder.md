@@ -1829,6 +1829,177 @@ apt install device-tree-compiler
 dtc -I fs -O dts /proc/device-tree > /tmp/running.dts
 ```
 ## 2026-05-25
-### PCIE 接 1684X 调试（未完）
+### PCIE 接口调试
+- 原理图
+    [RK3588+BM1684X-V1.0_20260305](20260525\RK3588+BM1684X-V1.0_20260305.pdf)
+    这个板子中 PCIe 资源分配如下：
+    1. PCIe3.0 PHY 共 4 条 lane，配置为 2 + 1 + 1 模式。
+        PORT0 使用 lane0 + lane1，共 2 条 lane，通过 `pcie3x4` 控制器配置为 PCIe Gen3 x2，用于 M.2 接口。
+        PORT1 的两条 lane 拆分为两个独立的 x1 使用：
+        lane2 通过 `pcie3x2` 控制器配置为 PCIe x1；
+        lane3 通过 `pcie2x1l1` 控制器配置为 PCIe x1。
+    2. PCIe2.0 部分共有 3 路 x1 资源：
+        一路用于板载网口；
+        一路用于外部 PCIe 设备接口，即 J4 / PCIE200，对应 `pcie2x1l2`；
+        剩余一路由于与其它功能复用冲突，在当前硬件设计中无法使用。
+        控制器的对应关系需要去看手册，并不是顺序对应
+        其中 J4 / PCIE200 使用 `combphy0_ps`，需要关闭与其复用的 SATA0，因此 DTS 中启用 `combphy0_ps` 和 `pcie2x1l2` ，同时禁用`sata0`。
+    3. 有一个时钟使能脚，是公用资源需要常高，不要配置成专属资源
+- 注意事项
+    拿到板子先跟硬件对 **电源时钟复位** 等相关资源，避免硬件问题阻碍软件调试
 
+1. `dts` 设备树配置部分
+    ```dts
+    /* J4 - PCIE200 */
+    &combphy0_ps {
+        status = "okay";
+    };
+
+    &pcie2x1l2 {
+        status = "okay";
+        num-lanes = <1>;
+        max-link-speed = <2>;
+        rockchip,skip-scan-in-resume;
+        rockchip,perst-inactive-ms = <500>;
+        vpcie3v3-supply = <&vcc3v3_pcie20_0>;
+        reset-gpios = <&gpio4 RK_PB3 GPIO_ACTIVE_HIGH>;
+    };
+
+    &sata0 {
+        status = "disabled";
+    };
+
+    /* PCIe3.0 PHY: 2 + 1 + 1 */
+    &pcie30phy {
+        rockchip,pcie30-phymode = <PHY_MODE_PCIE_NABINB>; /* 2 + 1 + 1 */
+        status = "okay";
+    };
+
+    /*
+    * PORT0: lane0 + lane1
+    */
+    &pcie3x4 {
+        status = "okay";
+        num-lanes = <2>;
+        max-link-speed = <3>;
+        vpcie3v3-supply = <&vcc3v3_pcie30>;
+        rockchip,skip-scan-in-resume;
+        rockchip,perst-inactive-ms = <500>;
+        reset-gpios = <&gpio4 RK_PB6 GPIO_ACTIVE_HIGH>; 
+    };
+
+    /*
+    * PORT1 Lane0：PCIE30_PORT1_TX2/RX2
+    */
+    &pcie3x2 {
+        status = "okay";
+        num-lanes = <1>;
+        max-link-speed = <3>;
+        vpcie3v3-supply = <&vcc3v3_pcie30>;
+        rockchip,skip-scan-in-resume;
+        rockchip,perst-inactive-ms = <500>;
+        reset-gpios = <&gpio4 RK_PA1 GPIO_ACTIVE_HIGH>;
+    };
+
+    /*
+    * PORT1 Lane1：PCIE30_PORT1_TX3/RX3
+    */
+    &pcie2x1l1 {
+        status = "okay";
+        num-lanes = <1>;
+        max-link-speed = <3>;
+        rockchip,perst-inactive-ms = <500>;
+
+        phys = <&pcie30phy>;
+        phy-names = "pcie-phy";
+        vpcie3v3-supply = <&vcc3v3_pcie30>;
+        reset-gpios = <&gpio4 RK_PA0 GPIO_ACTIVE_HIGH>;
+    };
+    ```
+### 1684X 驱动安装    
+这里调试的时候遇到三个问题
+1. `lib/modules/5.10.198` 运行时模块目录不完整
+2. `Linux Header` 编译环境不完整
+3. 1684X 驱动 `deb` 包需要能被正确安装并触发 `depmod / modprobe`
+
+这三部分的两个补丁里分工是：
+- [integrate-linux-header-in-sdk-combined.patch](20260525/integrate-linux-header-in-sdk-combined.patch) 主要修改通用构建流程，解决 `linux-headers` 标准化打包和输出目录问题，也顺带调整了模块放置路径
+- [integrate-linux-header-in-sdk-debian-combined.patch](20260525/integrate-linux-header-in-sdk-debian-combined.patch) 主要修改 `Debian rootfs` 流程
+
+#### `lib\modules\5.10.198` 目录补全
+由于原厂的SDK中，`./build.sh all` 或者 `./build.sh debian` 流程里，`mk-kernel.sh` 默认只负责内核镜像、`modules` 和 `linux-header`，但没有完全安装或者内容不完整，标准的 Linux 流程里，这个目录应该来自：
+1. 内核开启 `CONFIG_MODULES`
+2. 内核构建阶段正确生成`linux-image-5.10.198*.deb`
+3. 在 `rootfs` 构建阶段，将`linux-image` 包拷贝到`binary/packages/kernel`里面
+4. 在 chroot rootfs 内安装 `linux-image`，由包安装标准生成 `/lib/modules/5.10.198`
+
+关键地方可以查阅[mk-rootfs-bullseye.sh](20260525/mk-rootfs-bullseye.sh)的`line:47`和`line:128`
+
+#### `Linux Header` 补全 
+原本的SDK是把 `header` 打成一个 `linux-header.tar`，这对标准 `deb` 驱动安装、DKMS、外部模块构建不支持，所以 patch 补齐模块构建所需文件及目录结构
+修改方式：
+1. `mk-kernel.sh` 在生成 headers 前执行 `modules_prepare`
+2. 将 `include/`、`scripts/`、`tools/objtool`、`Module.symvers`、`System.map`、`.config`、`module.lds`等文件打入 header 包
+3. 从目标架构 `linux-kbuild-*` 目录覆盖`scripts/`和`tools/`，避免 `host/target` 架构不匹配
+4. 建立 `/lib/modules/<kernel-release>/build` 和 `source` 到` /usr/src/linux-headers-<kernel-release>` 的软链接
+
+关键的地方可以查阅[mk-kernel.sh](20260525/mk-kernel.sh)的`line:263` 和 [mk-all.sh](20260525/mk-all.sh)的`line:30`
+
+#### `deb` 包编译安装
+这里涉及到一个 [DKMS](https://www.cnblogs.com/wanglouxiaozi/p/18934802) 的概念，他是一个框架，旨在在内核更新时自动重新构建和安装内核模块，确保这些模块始终与当前运行的内核版本兼容，下面是安装`1684x driver deb`遇到的问题
+1. 原厂提供的[sophon-driver_0.5.1-LTS_arm64.deb](20260525/sophon-driver_0.5.1-LTS_arm64.deb)和[sophon-libsophon_0.5.1-LTS_arm64.deb](20260525/sophon-libsophon_0.5.1-LTS_arm64.deb)放进板子里面
+2. `dpkg -i sophon*`的时候遇到了`__aarch64_cas4_acq_rel undefined`的问题，在 `DKMS` 编译增加 `KCFLAGS=-mno-outline-atomics`
+    ```bash
+    python3 - <<'PY'
+    from pathlib import Path
+
+    p = Path("/usr/src/bmsophon-0.5.1/dkms.conf")
+    s = p.read_text()
+
+    if "KCFLAGS=-mno-outline-atomics" not in s:
+        s = s.replace(
+            'MAKE[0]="make ',
+            'MAKE[0]="make KCFLAGS=-mno-outline-atomics ',
+            1
+        )
+
+    p.write_text(s)
+    PY
+    ```
+3. 还要注意内核目录这些是否正常，修复后重新执行
+    ```bash
+    dkms remove bmsophon/0.5.1 --all || true
+    rm -rf /var/lib/dkms/bmsophon/0.5.1
+
+    dkms add -m bmsophon -v 0.5.1
+    dkms build -m bmsophon -v 0.5.1 -k $(uname -r)
+    dkms install -m bmsophon -v 0.5.1 -k $(uname -r)
+    ```
+4. 编译安装完成后模块位于`/lib/modules/5.10.198/updates/dkms/bmsophon.ko`，安装完之后需要重启一下
+5. 挂载模块
+    ```bash 
+    depmod -a $(uname -r)
+    modprobe bmsophon
+    ```
+
+集成进入rootfs，可以具体查阅 [mk-rootfs-bullseye.sh](20260525/mk-rootfs-bullseye.sh)的`line:47`和[rockchip.sh](20260525/rockchip.sh)
+#### 功能验证
+1. 输入 `bm-smi` 查看设备运行情况
+    ![alt text](20260525/bm-smi.png)
+2. 查看pcie设备`lspci`
+    ![alt text](20260525/lspci.png)
+3. `lspci -s pcie_devid -vvv`
+    ![alt text](20260525/lspci-vvv.png)
+## 2026-05-26
 ### USB 接口解析
+
+## 2026-05-28
+### chroot 执行错误
+![alt text](20260528/chroot_enter_error.png)
+进入`chroot`出现语法错误，大概是宿主机进入 `arm rootfs` 后，没法执行 `/bin/bash`，常见原因是`qemu-user-static` 和 `binfmt_misc` 没有满足，解决如下
+```bash 
+sudo apt-get update
+sudo apt-get install -y qemu-user-static binfmt-support
+sudo update-binfmts --enable qemu-aarch64
+update-binfmts --display qemu-aarch64
+```
