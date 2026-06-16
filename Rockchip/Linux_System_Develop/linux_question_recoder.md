@@ -1801,7 +1801,7 @@ RK3588的USB控制器包括2个`USB2.0HOST`控制、2个`USB3.1OTG`控制、1个
     - 根据`《Quectel_QConnectManager_Linux_用户指导_V1.0.pdf》`交叉编译`Quectel_Linux_Android_QMI_WWAN_Driver_V1.2.9`生成`quectel-CM`，放入系统
     - 使用`busybox mircocom`配置模块
         ```bash
-        busybox microcom /dev/ttyUSB2 -s115200 
+        busybox microcom /dev/ttyUSB2 -s 115200 
         AT+CFUN=0
         AT+CFUN=1
         AT+CPIN?
