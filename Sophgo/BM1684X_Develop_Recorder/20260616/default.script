@@ -1,0 +1,34 @@
+#!/bin/sh
+
+[ -n "$interface" ] || exit 1
+
+case "$1" in
+    deconfig)
+        ip addr flush dev "$interface" 2>/dev/null || true
+        ;;
+    bound|renew)
+        ip addr flush dev "$interface" 2>/dev/null || true
+
+        if [ -n "$subnet" ]; then
+            ifconfig "$interface" "$ip" netmask "$subnet" up
+        else
+            ifconfig "$interface" "$ip" up
+        fi
+
+        if [ -n "$router" ]; then
+            for gw in $router; do
+                ip route replace default via "$gw" dev "$interface"
+                break
+            done
+        fi
+
+        if [ -n "$dns" ]; then
+            : > /etc/resolv.conf
+            for ns in $dns; do
+                echo "nameserver $ns" >> /etc/resolv.conf
+            done
+        fi
+        ;;
+esac
+
+exit 0

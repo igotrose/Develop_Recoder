@@ -1,0 +1,15 @@
+[Unit]
+Description=Setup Quectel 4/5G Module
+After=systemd-udev-settle.service multi-user.target
+Wants=systemd-udev-settle.service
+
+[Service]
+Type=oneshot
+ExecStartPre=/bin/sleep 10
+ExecStart=/usr/sbin/quectel-autoconnect.sh start
+ExecStop=/usr/sbin/quectel-autoconnect.sh stop
+ExecReload=/usr/sbin/quectel-autoconnect.sh restart
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
