@@ -3,12 +3,12 @@
 
 set -u
 
-IP_ADDR=192.168.188.138
-IP_CIDR=192.168.188.138/24
+IP_ADDR=192.168.188.1
+IP_CIDR=192.168.188.1/24
 USB_MODE_PATH=/sys/kernel/debug/usb/39010000.usb/mode
 MSC_DEV=/dev/mmcblk0p6
 G=/tmp/usb/usb_gadget/cvitek
-MSC_LABEL=BM1688_MSC
+MSC_LABEL=CLAWSTAR
 MSC_INIT_FLAG=/data/.msc_inited
 
 log() { echo "[usb_gadget_init] $*"; }
@@ -32,7 +32,7 @@ done
 # - later boots: never format again
 if [ ! -f "$MSC_INIT_FLAG" ]; then
   FSTYPE="$(blkid -o value -s TYPE "$MSC_DEV" 2>/dev/null || true)"
-  mkfs.vfat -F 32 -n BM1688_MSC "$MSC_DEV" || fail "mkfs.vfat failed on $MSC_DEV"
+  mkfs.vfat -F 32 -n CLAWSTAR "$MSC_DEV" || fail "mkfs.vfat failed on $MSC_DEV"
   sync 
   mkdir -p /data
   touch "$MSC_INIT_FLAG"

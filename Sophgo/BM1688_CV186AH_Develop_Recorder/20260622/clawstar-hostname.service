@@ -1,0 +1,14 @@
+[Unit]
+Description=Set ClawStar hostname from WLAN MAC
+After=NetworkManager.service bmrt_loadko.service
+Wants=NetworkManager.service bmrt_loadko.service
+Before=avahi-daemon.service wifi-provision.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/clawstar-hostname.sh wlan0
+RemainAfterExit=yes
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,15 @@
+[Unit]
+Description=BM1688 Wi-Fi AP/STA Provision Service
+After=NetworkManager.service NetworkManager-wait-online.service bmrt_loadko.service
+Wants=NetworkManager.service NetworkManager-wait-online.service bmrt_loadko.service
+Conflicts=dhclient.service
+
+[Service]
+Type=simple
+ExecStartPre=/bin/sleep 8
+ExecStart=/usr/sbin/wifi-provision.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

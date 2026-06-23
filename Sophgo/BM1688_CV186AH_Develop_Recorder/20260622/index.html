@@ -1,0 +1,229 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ClawStar Wi-Fi Setup</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f5f7fa;
+      color: #202124;
+    }
+
+    .wrap {
+      max-width: 520px;
+      margin: 0 auto;
+      padding: 28px 16px;
+    }
+
+    .panel {
+      background: #fff;
+      border: 1px solid #dfe3ea;
+      border-radius: 8px;
+      padding: 20px;
+    }
+
+    h2 {
+      margin: 0 0 16px;
+      font-size: 22px;
+    }
+
+    input, button {
+      width: 100%;
+      box-sizing: border-box;
+      height: 44px;
+      margin-top: 10px;
+      font-size: 16px;
+    }
+
+    input {
+      border: 1px solid #c9d0da;
+      border-radius: 4px;
+      padding: 0 12px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 4px;
+      background: #1677ff;
+      color: #fff;
+      cursor: pointer;
+    }
+
+    button.secondary {
+      background: #eef2f7;
+      color: #202124;
+      border: 1px solid #c9d0da;
+    }
+
+    .status {
+      margin-top: 14px;
+      color: #5f6368;
+      font-size: 14px;
+    }
+
+    .notice {
+      display: none;
+      margin-top: 14px;
+      padding: 10px 12px;
+      border: 1px solid #b7d7ff;
+      border-radius: 6px;
+      background: #eef6ff;
+      color: #174a7c;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .wifi-list {
+      margin-top: 16px;
+      border-top: 1px solid #edf0f4;
+    }
+
+    .wifi-item {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+      padding: 10px 0;
+      border-bottom: 1px solid #edf0f4;
+    }
+
+    .wifi-name {
+      font-size: 15px;
+      overflow-wrap: anywhere;
+    }
+
+    .wifi-meta {
+      color: #5f6368;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .wifi-item button {
+      grid-column: 1 / 3;
+      margin-top: 6px;
+      height: 36px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel">
+      <h2>ClawStar Wi-Fi Setup</h2>
+
+      <form id="connect-form" method="post" action="/connect">
+        <input id="ssid" name="ssid" placeholder="Wi-Fi SSID" required>
+        <input name="psk" placeholder="Wi-Fi Password" type="password">
+        <button id="connect-button" type="submit">Connect</button>
+      </form>
+
+      <button class="secondary" id="scan-button" type="button" onclick="scanWifi()">Scan Wi-Fi</button>
+
+      <div class="status" id="status">Ready</div>
+      <div class="notice" id="connect-notice">
+        Connecting. If setup succeeds, this AP may disappear and your device may disconnect from this page.
+      </div>
+      <div class="wifi-list" id="wifi-list"></div>
+    </div>
+  </div>
+
+  <script>
+    async function refreshStatus() {
+      try {
+        const res = await fetch('/status');
+        const data = await res.json();
+        document.getElementById('status').textContent =
+          data.sta_connected ? 'Connected to Wi-Fi' : 'AP mode or disconnected';
+      } catch (e) {
+        document.getElementById('status').textContent = 'Status unavailable';
+      }
+    }
+
+    async function scanWifi() {
+      const listBox = document.getElementById('wifi-list');
+      const status = document.getElementById('status');
+      const button = document.getElementById('scan-button');
+
+      button.disabled = true;
+      button.textContent = 'Scanning...';
+      status.textContent = 'Scanning. This may take about 30 seconds.';
+      listBox.innerHTML = '';
+
+      try {
+        const res = await fetch('/scan');
+        const list = await res.json();
+
+        if (!res.ok) {
+          throw new Error('scan failed');
+        }
+
+        if (!list.length) {
+          status.textContent = 'No Wi-Fi found. You can enter SSID manually.';
+          return;
+        }
+
+        status.textContent = 'Select a Wi-Fi or enter SSID manually';
+
+        for (const ap of list) {
+          const item = document.createElement('div');
+          item.className = 'wifi-item';
+
+          const name = document.createElement('div');
+          name.className = 'wifi-name';
+          name.textContent = ap.ssid;
+
+          const meta = document.createElement('div');
+          meta.className = 'wifi-meta';
+          meta.textContent = `${ap.signal}% ${ap.security || ''}`;
+
+          const btn = document.createElement('button');
+          btn.className = 'secondary';
+          btn.type = 'button';
+          btn.textContent = 'Use this Wi-Fi';
+          btn.onclick = () => {
+            document.getElementById('ssid').value = ap.ssid;
+            status.textContent = `Selected ${ap.ssid}`;
+          };
+
+          item.appendChild(name);
+          item.appendChild(meta);
+          item.appendChild(btn);
+          listBox.appendChild(item);
+        }
+      } catch (e) {
+        status.textContent = 'Scan unavailable. You can enter SSID manually.';
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Scan Wi-Fi';
+      }
+    }
+
+    document.getElementById('connect-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+
+      const form = event.currentTarget;
+      const button = document.getElementById('connect-button');
+      const notice = document.getElementById('connect-notice');
+      const status = document.getElementById('status');
+
+      button.disabled = true;
+      button.textContent = 'Connecting...';
+      notice.style.display = 'block';
+      status.textContent = 'Trying to connect to the selected Wi-Fi';
+
+      try {
+        await fetch('/connect', {
+          method: 'POST',
+          body: new URLSearchParams(new FormData(form)),
+        });
+      } catch (e) {
+        status.textContent = 'Connection request sent. Waiting for network change';
+      }
+    });
+
+    refreshStatus();
+  </script>
+</body>
+</html>
