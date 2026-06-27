@@ -111,7 +111,7 @@ def delete_connection(name):
     if connection_exists(name):
         nmcli("con", "delete", name)
 
-
+# 等待 Wi-Fi 接口就绪，如果需要，加载 Wi-Fi 驱动模块
 def wait_iface():
     iface = CFG["WIFI_IFACE"]
     module = CFG["WIFI_MODULE"]
@@ -135,9 +135,10 @@ def sta_connected():
     return f"{iface}:connected" in state
 
 
+# 扫描 Wi-Fi 热点
 def scan_wifi():
     iface = CFG["WIFI_IFACE"]
-
+    # 内部会执行 nmcli 并把命令输出作为字符串返回
     text = nmout(
         "-t",
         "-e",
@@ -183,6 +184,7 @@ def scan_wifi():
     return sorted(aps.values(), key=lambda item: item["signal"], reverse=True)
 
 
+# 获取已知 Wi-Fi 连接
 def get_known_wifi():
     lines = nmout("-t", "-e", "no", "-f", "NAME,TYPE", "con", "show").splitlines()
     known = {}
@@ -371,7 +373,7 @@ def connect_best_known():
 
     return False
 
-
+# Web 服务回调
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/scan":
@@ -445,6 +447,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return
 
 
+# 启动 Web 服务器
 def start_web():
     port = int(CFG["WEB_PORT"])
 
@@ -482,14 +485,12 @@ def monitor_loop():
 
 
 def main():
-    # 导入配置
     load_config()
     # 让 NetworkManager 管理 Wi-Fi 接口，并确保 Wi-Fi 开启
     nmcli("radio", "wifi", "on")
 
     if not wait_iface():
         raise RuntimeError("%s not found" % CFG["WIFI_IFACE"])
-
     web = start_web()
 
     def stop(*_):

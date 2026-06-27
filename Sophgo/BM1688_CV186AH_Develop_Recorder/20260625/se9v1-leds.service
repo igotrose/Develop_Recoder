@@ -1,0 +1,25 @@
+[Unit]
+Description=SE9V1 Run and Battery LEDs
+After=multi-user.target
+
+[Service]
+Type=simple
+Environment=ADC_CHANNEL=2
+Environment=ADC_REF_MV=1800
+Environment=ADC_MAX_RAW=4095
+Environment=VBAT_SCALE_NUM=7
+Environment=VBAT_SCALE_DEN=3
+Environment=LOW_MAX_MV=3700
+Environment=FULL_MIN_MV=4200
+Environment=BAT_CAL_LOW_MV=3700
+Environment=BAT_CAL_LOW_RAW=1563
+Environment=BAT_CAL_FULL_MV=4200
+Environment=BAT_CAL_FULL_RAW=1149
+Environment=POLL_INTERVAL=1
+ExecStart=/usr/sbin/se9v1_leds.sh start
+ExecStop=/usr/sbin/se9v1_leds.sh stop
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
