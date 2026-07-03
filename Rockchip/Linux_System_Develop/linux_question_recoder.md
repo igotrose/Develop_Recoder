@@ -1858,11 +1858,10 @@ dtc -I fs -O dts /proc/device-tree > /tmp/running.dts
     &pcie2x1l2 {
         status = "okay";
         num-lanes = <1>;
-        max-link-speed = <2>;
+        rockchip,perst-inactive-ms = <3000>;
+        max-link-speed = <1>;
         rockchip,skip-scan-in-resume;
-        rockchip,perst-inactive-ms = <500>;
-        vpcie3v3-supply = <&vcc3v3_pcie20_0>;
-        reset-gpios = <&gpio4 RK_PB3 GPIO_ACTIVE_HIGH>;
+        reset-gpios = <&gpio1 RK_PA3 GPIO_ACTIVE_HIGH>;
     };
 
     &sata0 {
@@ -1881,10 +1880,9 @@ dtc -I fs -O dts /proc/device-tree > /tmp/running.dts
     &pcie3x4 {
         status = "okay";
         num-lanes = <2>;
-        max-link-speed = <3>;
+        max-link-speed = <1>;
         vpcie3v3-supply = <&vcc3v3_pcie30>;
         rockchip,skip-scan-in-resume;
-        rockchip,perst-inactive-ms = <500>;
         reset-gpios = <&gpio4 RK_PB6 GPIO_ACTIVE_HIGH>; 
     };
 
@@ -1894,10 +1892,10 @@ dtc -I fs -O dts /proc/device-tree > /tmp/running.dts
     &pcie3x2 {
         status = "okay";
         num-lanes = <1>;
-        max-link-speed = <3>;
+        max-link-speed = <1>;
         vpcie3v3-supply = <&vcc3v3_pcie30>;
         rockchip,skip-scan-in-resume;
-        rockchip,perst-inactive-ms = <500>;
+        rockchip,perst-inactive-ms = <3000>;
         reset-gpios = <&gpio4 RK_PA1 GPIO_ACTIVE_HIGH>;
     };
 
@@ -1907,13 +1905,28 @@ dtc -I fs -O dts /proc/device-tree > /tmp/running.dts
     &pcie2x1l1 {
         status = "okay";
         num-lanes = <1>;
-        max-link-speed = <3>;
-        rockchip,perst-inactive-ms = <500>;
-
+        max-link-speed = <1>;
+        rockchip,perst-inactive-ms = <3000>;
         phys = <&pcie30phy>;
         phy-names = "pcie-phy";
         vpcie3v3-supply = <&vcc3v3_pcie30>;
         reset-gpios = <&gpio4 RK_PA0 GPIO_ACTIVE_HIGH>;
+    };
+
+    /* 
+    * J10 - PCIE201
+    */
+    &combphy1_ps {
+        status = "okay";
+    };
+
+    &pcie2x1l0 {
+        status = "okay";
+        num-lanes = <1>;
+        rockchip,skip-scan-in-resume;
+        rockchip,perst-inactive-ms = <3000>;
+        max-link-speed = <1>;
+        reset-gpios = <&gpio1 RK_PA2 GPIO_ACTIVE_HIGH>;
     };
     ```
 ### 1684X 驱动安装    
@@ -2003,3 +2016,49 @@ sudo apt-get install -y qemu-user-static binfmt-support
 sudo update-binfmts --enable qemu-aarch64
 update-binfmts --display qemu-aarch64
 ```
+## 2026-07-03
+### RK3588 + BM1684X PCIE 接口复调 
+[kernel/drivers/pci/controller/dwc/pcie-dw-rockchip.c](20260703\pcie-dw-rockchip.c)
+- 现象问题描述
+    RK3588 作为 PCIe RC，接口已打开，主控侧 PERST#、REFCLK 及相关供电均正常，但 BM1684X 侧未正常进入 EP 模式，导致 PCIe 链路未按预期建立
+- 解决方案
+    排查发现，PERST# 上电初期第一段高电平由模组侧 3.3V 上拉引起；去除上拉后，又发现 RK3588 不同 IO 上电默认电平存在差异。最终将 PERST# 切换到默认低电平的 IO，使其在 U-Boot 阶段持续保持低电平，待 kernel PCIe 初始化时再释放，BM1684X 即可正常进入 EP 模式。
+- `uboot-dts` 设备树配置部分
+    ```dts
+    &gpio1 {
+        pcie2x1l2-perst-hog {
+            gpio-hog;
+            gpios = <RK_PA3 GPIO_ACTIVE_LOW>;
+            output-high;
+            line-name = "pcie2x1l2-perst";
+            u-boot,dm-pre-reloc;
+        };
+        
+        pcie2x1l0-perst-hog {
+            gpio-hog;
+            gpios = <RK_PA2 GPIO_ACTIVE_LOW>;
+            output-high;
+            line-name = "pcie2x1l0-perst";
+            u-boot,dm-pre-reloc;
+        };
+    };
+
+    &gpio4 {
+        pcie3x2-perst-hog {
+            gpio-hog;
+            gpios = <RK_PA1 GPIO_ACTIVE_LOW>;
+            output-high;
+            line-name = "pcie3x2-perst";
+            u-boot,dm-pre-reloc;
+        };
+
+        pcie2x1l1-perst-hog {
+            gpio-hog;
+            gpios = <RK_PA0 GPIO_ACTIVE_LOW>;
+            output-high;
+            line-name = "pcie2x1l1-perst";
+            u-boot,dm-pre-reloc;
+        };
+    };
+    ```
+### RK3588 + BM1684X 用户态 + 驱动层修改
