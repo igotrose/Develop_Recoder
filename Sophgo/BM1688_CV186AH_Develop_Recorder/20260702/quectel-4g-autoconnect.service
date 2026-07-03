@@ -1,0 +1,18 @@
+[Unit]
+Description=Quectel EC20/EC25 4G WWAN Auto Connect
+After=systemd-udev-settle.service network.target
+Wants=systemd-udev-settle.service
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/quectel-4g-autoconnect
+ExecStart=/usr/sbin/quectel-4g-autoconnect.sh monitor
+ExecStop=/usr/sbin/quectel-4g-autoconnect.sh stop
+ExecReload=/usr/sbin/quectel-4g-autoconnect.sh restart
+Restart=always
+RestartSec=10
+TimeoutStartSec=20
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

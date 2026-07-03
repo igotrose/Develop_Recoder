@@ -1,0 +1,19 @@
+# EC20/EC25 WWAN defaults. Override only if your board enumerates differently.
+# Leave AT_DEVICE unset to auto-detect /dev/ttyUSB*.
+# QUECTEL_4G_AT_DEVICE=/dev/ttyUSB2
+QUECTEL_4G_NET_IFACE=wwan0
+QUECTEL_4G_WDM_DEVICE=/dev/cdc-wdm0
+
+# Leave APN empty to use the SIM/module default PDP context.
+# Set it only for SIM cards that require an explicit APN.
+# QUECTEL_4G_APN=internet
+
+# Used when the modem/DHCP path does not populate DNS.
+# QUECTEL_4G_FALLBACK_DNS="114.114.114.114 223.5.5.5"
+
+# Timing knobs.
+# QUECTEL_4G_DEVICE_TIMEOUT=30
+# QUECTEL_4G_MONITOR_INTERVAL=10
+# QUECTEL_4G_NET_START_GRACE=5
+# QUECTEL_4G_DHCP_TIMEOUT=30
+# QUECTEL_4G_MAX_RETRY_INTERVAL=60
