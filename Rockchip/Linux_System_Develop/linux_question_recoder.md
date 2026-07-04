@@ -1064,59 +1064,107 @@ echo "-- Done."
 ## 2025-10-31
 ### USB调试
 - 参考文档
-    ```
-    《Rockchip_Developer_Guide_USB_CN.pdf》
-    《Rockchip_RK3588_Developer_Guide_USB_CN.pdf》
-    ```
+   [Rockchip_Developer_Guide_USB_CN.pdf](20251204\Rockchip_Developer_Guide_USB_CN.pdf)
+   [Rockchip_RK3588_Developer_Guide_USB_CN.pdf](20251204\Rockchip_RK3588_Developer_Guide_USB_CN.pdf)
+- 芯片 usb 资源
+    RK3588 支持 5 个独立的 USB 控制器和 7 个独立的 USB PHY
+    | USB 接口名称 | USB 控制器 | USB PHY | 说明 |
+    |---|---|---|---|
+    | `TYPEC0` | `OTG0 (DWC3 & xHCI)` | `USB3.1/DP ComboPHY0` + `USB2.0 PHY0` | USB3.1 OTG0，可作为 Host / Device / OTG，通常对应 Type-C0 |
+    | `TYPEC1` | `OTG1 (DWC3 & xHCI)` | `USB3.1/DP ComboPHY1` + `USB2.0 PHY1` | USB3.1 OTG1，可作为 Host / Device / OTG，通常对应 Type-C1 |
+    | `USB20_HOST0` | `USB2.0 HOST0 (EHCI & OHCI)` | `USB2.0 PHY2` | 独立 USB2.0 Host0 |
+    | `USB20_HOST1` | `USB2.0 HOST1 (EHCI & OHCI)` | `USB2.0 PHY3` | 独立 USB2.0 Host1 |
+    | `USB30_2` | `USB3.1 HOST2 (xHCI)` | `USB3.1/SATA/PCIe ComboPHY2` | 独立 USB3.1 Host，只支持 Host |
 - 原理图
-    板卡上使用两个usb3.0，一个是usb3.0only，一个是usb3.0+dp，板子上硬件都是Type A的座子，即使有一个座子是带有usb2.0otg的一队数据线，但是因为座子id引脚，所以只能是usb3.0
+    板卡上使用两个usb3.0，一个是usb3.0only，一个是usb3.0+dp，板子上硬件都是Type A的座子，即使有一个座子是带有usb2.0otg的一对数据线，但是因为座子id引脚，所以只能是usb3.0
     ![alt text](20251031/usb_schematic.png)
 1. `dts` 设备树配置部分
     ```dts
-    &u2phy0_otg {
-        rockchip,typec-vbus-det;
-        phy-supply = <&vcc5v0_host>;
-        status = "okay";
-    };
-
-    &u2phy2_host {
-        phy-supply = <&vcc5v0_host>;
+    /* CH334 - USB2.0 HOST1 */
+    &u2phy3 {
         status = "okay";
     };
 
     &u2phy3_host {
-        phy-supply = <&vcc5v0_host>;
         status = "okay";
     };
 
-    &usbdp_phy0_dp {
+    &usb_host1_ehci {
+        status = "okay";
+    };
+
+    &usb_host1_ohci {
+        status = "okay";
+    };
+
+    &u2phy1 {
+        status = "okay";
+    };
+
+    &u2phy1_otg {
+        status = "okay";
+    };
+
+    &usbdp_phy1 {
+        status = "okay";
+    };
+
+    &usbdp_phy1_u3 {
+        status = "okay";
+    };
+
+    &usbdrd3_1 {
+        status = "okay";
+    };
+
+    &usbdrd_dwc3_1 {
+        status = "okay";
+        dr_mode = "host";
+    };
+
+    &u2phy2 {
+        status = "okay";
+    };
+
+    &u2phy2_host {
+        status = "okay";
+    };
+
+    &usb_host0_ehci {
+        status = "okay";
+    };
+
+    &usb_host0_ohci {
+        status = "okay";
+    };
+
+    /* J30 - USB3.0 OTG TYPEC0 */
+    &u2phy0 {
+        status = "okay";
+    };
+
+    &u2phy0_otg {
+        rockchip,typec-vbus-det;
+        status = "okay";
+    };
+
+    &usbdp_phy0 {
         status = "okay";
     };
 
     &usbdp_phy0_u3 {
-        rockchip,dp-lane-mux = <2 3>;
+        status = "okay";
+    };
+
+    &usbdrd3_0 {
         status = "okay";
     };
 
     &usbdrd_dwc3_0 {
-        dr_mode = "host";
         status = "okay";
-    };
-
-    &usbhost3_0 {
-        status = "okay";
-    };
-
-    &usbhost_dwc3_0 {
-        status = "okay";
+        dr_mode = "peripheral";
     };
     ```
-2. `Menuoncfig`配置
-3. 重新编译，烧录查看日志
-    ```bash
-    dmesg | grep usb 
-    ```
-4. 功能验证，可以将硬盘等存储设备插入usb口，然后查看是否有设备挂载
 ## 2025-11-06
 ### HDMI-RX调试
 - 参考文档
@@ -1621,7 +1669,7 @@ RK3588的USB控制器包括2个`USB2.0HOST`控制、2个`USB3.1OTG`控制、1个
 ![alt text](20251204/usb_controller_pins.png)
 ### USB调试
 - 参考文档
-    [Rockchip_RK3588_Developer_Guide_USB_CN.pdf](20251204\Rockchip_Developer_Guide_USB_CN.pdf)
+    [Rockchip_Developer_Guide_USB_CN.pdf](20251204\Rockchip_Developer_Guide_USB_CN.pdf)
 - 原理图    
     ![alt text](20251204/rk3588_usb_controller.png)
     ```
@@ -2003,8 +2051,6 @@ dtc -I fs -O dts /proc/device-tree > /tmp/running.dts
     ![alt text](20260525/lspci.png)
 3. `lspci -s pcie_devid -vvv`
     ![alt text](20260525/lspci-vvv.png)
-## 2026-05-26
-### USB 接口解析
 
 ## 2026-05-28
 ### chroot 执行错误
