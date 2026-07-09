@@ -1,0 +1,410 @@
+From 59383e53fe6f3cce4791040d337285f98272c309 Mon Sep 17 00:00:00 2001
+From: qiupeiqin <qiupeiqin@cs-t.cn>
+Date: Wed, 8 Jul 2026 03:05:23 +0000
+Subject: [PATCH] adjust gc9a01 driver
+
+Change-Id: I78bcd0f8e7dc4c3228896aa4459961c415e0fc95
+---
+ boards/default/dts/sophon/soph_base.dtsi      |   2 +-
+ .../u-boot/cv186x_bga_cvi_board_init.c        |  66 ++++++--
+ .../dts_arm64/bm1688_se9v1_8G.dts             | 146 +++++++++++++++++-
+ .../linux/edge_wevb_emmc_defconfig            |  15 +-
+ boards/sophon/edge_wevb_emmc/multi.its        |   2 +-
+ envsetup_soc.sh                               |   6 +-
+ 6 files changed, 209 insertions(+), 28 deletions(-)
+
+diff --git a/boards/default/dts/sophon/soph_base.dtsi b/boards/default/dts/sophon/soph_base.dtsi
+index daf1244..6c8ae0c 100755
+--- a/boards/default/dts/sophon/soph_base.dtsi
++++ b/boards/default/dts/sophon/soph_base.dtsi
+@@ -1575,7 +1575,7 @@
+ 		pwm-names = "fan", "tach";
+ 		pwms = <&pwm0 0 1000000>, // default pwm0, 1ms period, normal polarity
+ 			<&pwm0 1 1000000>;
+-		cooling-levels = <1 100 170 255>; // max 255
++		cooling-levels = <100 150 200 240>; // max 255
+ 
+ 		pulses-per-revolution = <2>;	//fan-tach PPR, default 2
+ 	};
+diff --git a/boards/default/u-boot/cv186x_bga_cvi_board_init.c b/boards/default/u-boot/cv186x_bga_cvi_board_init.c
+index 4191ba5..197eed5 100755
+--- a/boards/default/u-boot/cv186x_bga_cvi_board_init.c
++++ b/boards/default/u-boot/cv186x_bga_cvi_board_init.c
+@@ -1,3 +1,10 @@
++#define PWR_GPIO_DATA_REG	0x5021000
++#define PWR_GPIO_DIR_REG	0x5021004
++#define BAT_RED_BIT		(1 << 4) /* PWR_GPIO4 */
++#define BAT_BLUE_BIT		(1 << 5) /* PWR_GPIO5 */
++#define BAT_GREEN_BIT		(1 << 6) /* PWR_GPIO6 */
++#define BAT_LED_BITS		(BAT_RED_BIT | BAT_BLUE_BIT | BAT_GREEN_BIT)
++
+ int cvi_board_init(void)
+ {
+ 	PINMUX_CONFIG(CAM_MCLK0, CAM_MCLK0, G9);
+@@ -16,8 +23,7 @@ int cvi_board_init(void)
+ 	PINMUX_CONFIG(IIC4_SDA, IIC4_SDA, G12);
+ 	PINMUX_CONFIG(IIC5_SCL, IIC5_SCL, G12);
+ 	PINMUX_CONFIG(IIC5_SDA, IIC5_SDA, G12);
+-	// PINMUX_CONFIG(UART2_RX, IIC6_SCL, G12);
+-	// PINMUX_CONFIG(UART2_TX, IIC6_SDA, G12);
++
+ 	PINMUX_CONFIG(CAM_XLR0, GPIO69, G9);
+ 	PINMUX_CONFIG(CAM_XLR1, GPIO70, G9);
+ 	PINMUX_CONFIG(GPIO4, GPIO115, G12);
+@@ -65,29 +71,55 @@ int cvi_board_init(void)
+ 	PINMUX_CONFIG(GPIO2, SPI1_SDO, G12);
+ 	PINMUX_CONFIG(GPIO3, SPI1_SCK, G12);
+ 
+-		//GPIO
+-	PINMUX_CONFIG(PAD_MIPI0_TX0P,GPIO174,PHY);	//A2_STATUS_LED
+-	PINMUX_CONFIG(PAD_MIPI0_TX0N,GPIO175,PHY);	//A2_ALARM_LED
+-	PINMUX_CONFIG(PAD_MIPI0_TX1P,GPIO176,PHY);	//A2_SSD_STATUS_LED
+-	PINMUX_CONFIG(PAD_MIPI0_TX1N,GPIO177,PHY);	//A2_SSD_ALARM_LED
+-	PINMUX_CONFIG(PAD_MIPI1_TX0N,GPIO186,PHY);	//WIFI_EN
+-	PINMUX_CONFIG(PAD_MIPI1_TX1P,GPIO187,PHY);	//GPIO187 GPIO_LTE_RST
+-	PINMUX_CONFIG(PAD_MIPI1_TX1N,GPIO188,PHY);	//GPIO188 GPIO_LTE_PWR_EN 5G_OFF#
+-	PINMUX_CONFIG(PAD_MIPI1_TX2P,GPIO189,PHY);	//GPIO189 FLIGHT_MODE# W_DISABLE#
+-
+ 	PINMUX_CONFIG(PWR_BUTTON1, PWR_GPIO8, G7);
+ 
+ 	PINMUX_CONFIG(PAD_VIVO_CLK, GPIO184, G5);
+ 	PINMUX_CONFIG(PAD_VIVO0_D10, GPIO128, G5);
+ 	PINMUX_CONFIG(PAD_VIVO0_D11, GPIO129, G5);
+ 	PINMUX_CONFIG(PAD_VIVO0_D12, GPIO130, G5);
+-
+-	//pwm-fan
+-	PINMUX_CONFIG(PWM0, PWM0, G9);
+-	PINMUX_CONFIG(PWM1, PWM1, G9);
+-	// RTC 
++	
++	// Real Time Clock
+ 	PINMUX_CONFIG(SD1_D2, IIC6_SDA, G11);
+ 	PINMUX_CONFIG(SD1_D3, IIC6_SCL, G11);
+ 
++	// Power
++	PINMUX_CONFIG(FAN0, GPIO79, G9);
++	PINMUX_CONFIG(ADC1, ADC1, G12);
++
++	// SD Card 
++	PINMUX_CONFIG(SD0_PWR_EN, SD0_PWR_EN, G9);
++	PINMUX_CONFIG(SD1_CLK, GPIO62, G11);
++
++	// LCD Panel
++	PINMUX_CONFIG(SPI0_CS_X, GPIO107, G9);
++	PINMUX_CONFIG(SPI0_SDI, GPIO108, G9);
++	PINMUX_CONFIG(SPI0_SDO, SPI0_SDO, G9);
++	PINMUX_CONFIG(SPI0_SCK, SPI0_SCK, G9);
++	PINMUX_CONFIG(CAN0_TX, GPIO105, G11);
++	PINMUX_CONFIG(PWM2, GPIO77, G9);
++
++	// WIFI En
++	PINMUX_CONFIG(PWM0, GPIO75, G9);
++
++	// Type-C
++	PINMUX_CONFIG(SD1_CMD, GPIO63, G11);
++	PINMUX_CONFIG(SD1_D0, GPIO64, G11);
++
++	// LED
++	PINMUX_CONFIG(PWM1, GPIO76, G9);
++	PINMUX_CONFIG(FAN1, GPIO80, G9);
++
++	// Battery Indicator RGB Light 
++	PINMUX_CONFIG(PWR_GPIO4, PWR_GPIO4, G7);
++	PINMUX_CONFIG(PWR_GPIO5, PWR_GPIO5, G7);
++	PINMUX_CONFIG(PWR_GPIO6, PWR_GPIO6, G7);
++	mmio_write_32(PWR_GPIO_DIR_REG, mmio_read_32(PWR_GPIO_DIR_REG) | BAT_LED_BITS);
++	mmio_write_32(PWR_GPIO_DATA_REG,
++		      (mmio_read_32(PWR_GPIO_DATA_REG) & ~(BAT_RED_BIT | BAT_BLUE_BIT)) |
++		      BAT_GREEN_BIT);
++
++	// FAN
++	PINMUX_CONFIG(SD1_D1, PWM18, G11);
++	
+ 	return 0;
+ }
+diff --git a/boards/sophon/edge_wevb_emmc/dts_arm64/bm1688_se9v1_8G.dts b/boards/sophon/edge_wevb_emmc/dts_arm64/bm1688_se9v1_8G.dts
+index fa38068..17ca629 100755
+--- a/boards/sophon/edge_wevb_emmc/dts_arm64/bm1688_se9v1_8G.dts
++++ b/boards/sophon/edge_wevb_emmc/dts_arm64/bm1688_se9v1_8G.dts
+@@ -4,6 +4,8 @@
+ #include "soph_asic_emmc.dtsi"
+ #include "soph_default_memmap.dtsi"
+ 
++#include "dt-bindings/usb/pd.h"
++
+ / {
+ 	aliases {
+ 		serial0 = &uart0;
+@@ -39,6 +41,29 @@
+ #endif
+ 	};
+ 
++	usb0_host_sw: regulator-usb0-host-sw {
++		compatible = "regulator-fixed";
++		regulator-name = "usb0-host-sw";
++		regulator-min-microvolt = <5000000>;
++		regulator-max-microvolt = <5000000>;
++		gpio = <&portc 0 GPIO_ACTIVE_HIGH>;   
++		enable-active-high;
++        // regulator-boot-on;
++        // regulator-always-on;
++	};
++
++	usb0_vbus: regulator-usb0-vbus {
++		compatible = "regulator-fixed";
++		regulator-name = "usb0-vbus";
++		regulator-min-microvolt = <5000000>;
++		regulator-max-microvolt = <5000000>;
++		gpio = <&portb 31 GPIO_ACTIVE_HIGH>;  
++		enable-active-high;
++		vin-supply = <&usb0_host_sw>;
++		// regulator-boot-on;
++        // regulator-always-on;
++	};
++
+ 	pcie@20400000 {
+ 		reset-gpio = <&porte 1 GPIO_ACTIVE_HIGH>; //gpio 129
+ 	};
+@@ -71,6 +96,7 @@
+ 			};
+ 		};
+ 	};
++
+ };
+ 
+ &uart0 {
+@@ -124,7 +150,7 @@
+ &panel {
+ 	compatible = "cvitek,lcm18x56";
+ 	power-gpio = <&portd 15 GPIO_ACTIVE_HIGH>;
+-	status = "disable";
++	status = "disabled";
+ };
+ 
+ &panel1 {
+@@ -133,20 +159,130 @@
+ 	status = "disable";
+ };
+ 
+-
+ &usbdrd3_0 {
+ 	usbdrd_dwc3_0: usb@39010000 {
+-		role-switch-default-mode = "host";
++		status = "okay";
++		/delete-property/ usb-role-switch;
++		dr_mode = "device";
++		role-switch-default-mode = "device";
++		maximum-speed = "super-speed";
++
++		port {
++			#address-cells = <1>;
++			#size-cells = <0>;
++			dwc3_role_switch: endpoint@0 {
++				reg = <0>;
++				remote-endpoint = <&usbc0_role_sw>; 
++			};
++		};
+ 	};
+ };
+ 
+ &i2c6 {
+ 	rtc@51 {
+-			compatible = "nxp,pcf8563";
+-			reg = <0x51>;
++		compatible = "nxp,pcf8563";
++		reg = <0x51>;
++	};
++
++	usbc0: husb311@4e {
++		compatible = "hynetek,husb311";
++		reg = <0x4e>;
++		interrupt-parent = <&portd>;
++		interrupts = <10 IRQ_TYPE_LEVEL_LOW>;
++		status = "disabled"; // device-only mode: bypass HUSB311/TCPM role-switch
++
++		port {
++			usbc0_role_sw: endpoint {
++				remote-endpoint = <&dwc3_role_switch>;
++			};
++		};
++
++		usb_con: connector {
++			compatible = "usb-c-connector";
++			label = "USB-C";
++			data-role = "dual";
++			power-role = "dual";
++			try-power-role = "sink";
++			op-sink-microwatt = <1000000>;
++			sink-pdos = <PDO_FIXED(5000, 2500, PDO_FIXED_USB_COMM)>;
++			source-pdos = <PDO_FIXED(5000, 1500, PDO_FIXED_USB_COMM)>;
++		};
+ 	};
+ };
+ 
+ &can0 {
+     label = "SE9";
++	status = "disabled";
++};
++
++&can1 {
++	status = "disabled";
++};
++
++&ethernet0 {
++	status = "disabled";
++};
++
++&ethernet1 {
++	status = "disabled";
++};
++
++&sata {
++	status = "disabled";
++};	
++
++&fan0 {
++	pwm-names = "fan";
++	pwms = <&pwm4 2 1000000>;
++};
++
++&gpio_leds {
++	led-status {
++		label = "battery:red:low";
++		gpios = <&portg 4 GPIO_ACTIVE_HIGH>; /* PWR_GPIO4 */
++		default-state = "off";
++	};
++
++	led-error {
++		label = "battery:blue:mid";
++		gpios = <&portg 5 GPIO_ACTIVE_HIGH>; /* PWR_GPIO5 */
++		default-state = "off";
++	};
++
++	led-ssd-alarm {
++		label = "battery:green:full";
++		gpios = <&portg 6 GPIO_ACTIVE_HIGH>; /* PWR_GPIO6 */
++		default-state = "on";
++	};
++
++	led-run-gpio76 {
++		label = "se9v1:green:run";
++		gpios = <&portc 12 GPIO_ACTIVE_HIGH>; /* GPIO76 */
++		default-state = "off";
++	};
++
++	led-status-gpio80 {
++		label = "se9v1:green:status";
++		gpios = <&portc 16 GPIO_ACTIVE_HIGH>; /* GPIO80 */
++		default-state = "off";
++	};
++};
++
++&spi0 {
++	status = "okay";
++	cs-gpios = <&portd 11 GPIO_ACTIVE_LOW>;
++	num-cs = <1>;
++
++	/delete-node/ spidev@0;
++
++	display@0 {
++		compatible = "hynetek,gc9a01-boe-1.28";
++		reg = <0>;
++		spi-max-frequency = <4000000>;
++
++		reset-gpios = <&portd 9 GPIO_ACTIVE_HIGH>; /* GPIO105, active-low panel reset */
++		dc-gpios = <&portd 12 GPIO_ACTIVE_HIGH>; /* GPIO108, SPI0_SDI */
++		backlight-gpios = <&portc 13 GPIO_ACTIVE_HIGH>; /* GPIO77 / PWM2 */
++		rotation = <0>;
++	};
+ };
+diff --git a/boards/sophon/edge_wevb_emmc/linux/edge_wevb_emmc_defconfig b/boards/sophon/edge_wevb_emmc/linux/edge_wevb_emmc_defconfig
+index 4b87fcf..7c82fbb 100755
+--- a/boards/sophon/edge_wevb_emmc/linux/edge_wevb_emmc_defconfig
++++ b/boards/sophon/edge_wevb_emmc/linux/edge_wevb_emmc_defconfig
+@@ -180,7 +180,6 @@ CONFIG_ION=y
+ CONFIG_ION_SYSTEM_HEAP=y
+ CONFIG_ION_CARVEOUT_HEAP=y
+ CONFIG_ION_CMA_HEAP=y
+-CONFIG_PWM=n
+ CONFIG_ANDROID=y
+ # CONFIG_GATOR is not set
+ CONFIG_EFIVAR_FS=n
+@@ -378,6 +377,12 @@ CONFIG_USB_DWC3_GADGET=y
+ CONFIG_USB_DWC3_DUAL_ROLE=y
+ CONFIG_USB_DWC3_OF_SIMPLE=y
+ 
++CONFIG_TYPEC=y
++CONFIG_TYPEC_TCPM=y
++CONFIG_TYPEC_TCPCI=y
++CONFIG_TYPEC_FUSB302=y
++CONFIG_TYPEC_HUSB311=y
++
+ CONFIG_USB_XHCI_HCD=y
+ CONFIG_USB_XHCI_PLATFORM=y
+ 
+@@ -733,6 +738,7 @@ CONFIG_IIO=y
+ CONFIG_CVITEK_ADC=m
+ 
+ CONFIG_PWM=y
++CONFIG_BACKLIGHT_PWM=y
+ CONFIG_CVITEK_PWM=m
+ 
+ CONFIG_INPUT_KEYBOARD=y
+@@ -758,7 +764,7 @@ CONFIG_IWLMVM=m
+ CONFIG_AIC_WLAN_SUPPORT=y
+ CONFIG_AIC8800_WLAN_SUPPORT=m
+ CONFIG_AIC_LOADFW_SUPPORT=m
+-CONFIG_RTL8822CU=m
++CONFIG_RTL8822CU=y
+ CONFIG_USB_USBNET=y
+ CONFIG_USB_NET_RNDIS_WLAN=y
+ CONFIG_USB_NET_DRIVERS=y
+@@ -854,3 +860,8 @@ CONFIG_CGROUP_BPF=y
+ CONFIG_COMPAT=y
+ CONFIG_COMPAT_32BIT_TIME=y
+ CONFIG_COMPAT_BINFMT_ELF=y
++
++CONFIG_BACKLIGHT_CLASS_DEVICE=y
++CONFIG_DRM_MIPI_DBI=y
++CONFIG_TINYDRM_GC9A01=y
++CONFIG_DRM_FBDEV_EMULATION=y
+diff --git a/boards/sophon/edge_wevb_emmc/multi.its b/boards/sophon/edge_wevb_emmc/multi.its
+index f643c36..5d758a1 100755
+--- a/boards/sophon/edge_wevb_emmc/multi.its
++++ b/boards/sophon/edge_wevb_emmc/multi.its
+@@ -821,7 +821,7 @@
+ 
+ 	/*CFG*/
+ 	configurations {
+-		default = "config-cv186ah_wevb_4G";
++		default = "config-bm1688_se9v1_8G";
+ 
+ 		config-bm1688_se9v1_4G {
+ 			description = "boot cvitek system with board bm1688_se9v1_4G";
+diff --git a/envsetup_soc.sh b/envsetup_soc.sh
+index e2bd8ad..83c906d 100755
+--- a/envsetup_soc.sh
++++ b/envsetup_soc.sh
+@@ -687,7 +687,8 @@ rm -rf /var/lib/apt/lists/*
+ export DEBIAN_FRONTEND=noninteractive
+ apt-get update
+ apt-get install -y --no-install-recommends \
+-  dnsmasq curl ca-certificates 
++  network-manager dnsmasq curl ca-certificates wpasupplicant iw isc-dhcp-client \
++  avahi-daemon avahi-utils \
+ 
+ # install uv to system path in rootfs 
+ curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
+@@ -1366,7 +1367,8 @@ function build_package()
+     sudo chown 1000:1000 -R rootfs_rw/overlay/home/linaro
+ 
+     sudo mkdir -p rootfs_rw/overlay/opt
+-    sudo mv "${EDGE_ROOTFS_DIR}"/opt/sophon rootfs_rw/overlay/opt/
++    sudo rm -rf rootfs_rw/overlay/opt/sophon
++    sudo cp -a "${EDGE_ROOTFS_DIR}"/opt/sophon rootfs_rw/overlay/opt/
+ 
+     sudo mkdir -p rootfs_rw/overlay/opt/tunstar
+     sudo cp -a "${TOP_DIR}/ubuntu/bootloader-arm64/third-part/star-llm" \
+-- 
+2.34.1
+

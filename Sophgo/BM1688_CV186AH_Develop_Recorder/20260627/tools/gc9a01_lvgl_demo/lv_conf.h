@@ -1,0 +1,41 @@
+/* SPDX-License-Identifier: MIT */
+#ifndef LV_CONF_H
+#define LV_CONF_H
+
+#include <stdint.h>
+
+#define LV_COLOR_DEPTH 16
+#define LV_USE_STDLIB_MALLOC LV_STDLIB_BUILTIN
+#define LV_USE_STDLIB_STRING LV_STDLIB_BUILTIN
+#define LV_USE_STDLIB_SPRINTF LV_STDLIB_BUILTIN
+#define LV_MEM_SIZE (128U * 1024U)
+
+#define LV_DEF_REFR_PERIOD 33
+#define LV_DPI_DEF 130
+
+#define LV_USE_LOG 0
+#define LV_USE_ASSERT_NULL 0
+#define LV_USE_ASSERT_MALLOC 0
+#define LV_USE_ASSERT_STYLE 0
+#define LV_USE_ASSERT_MEM_INTEGRITY 0
+#define LV_USE_ASSERT_OBJ 0
+
+#define LV_FONT_MONTSERRAT_12 1
+#define LV_FONT_MONTSERRAT_14 1
+#define LV_FONT_MONTSERRAT_16 1
+#define LV_FONT_DEFAULT &lv_font_montserrat_14
+
+#define LV_USE_LABEL 1
+#define LV_USE_ARC 1
+#define LV_USE_BAR 1
+#define LV_USE_BUTTON 1
+#define LV_USE_SPINNER 1
+
+#define LV_USE_OS LV_OS_NONE
+
+#define LV_BUILD_EXAMPLES 0
+#define LV_USE_DEMO_WIDGETS 0
+#define LV_USE_DEMO_BENCHMARK 0
+#define LV_USE_DEMO_STRESS 0
+
+#endif
