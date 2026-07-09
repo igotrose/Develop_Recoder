@@ -62,6 +62,7 @@ usb update 目录结构
 ### OTA 升级 
 ## 部分更新
 ### 更新u-boot
+#### BM1688
 - 拉取编译更新之后的`fip.bin`到当前目录
     ```bash
     scp ubuntu@192.168.5.223:/home/ubuntu/workspace/Sophgo/bm1688/BM1688_EDGEs_v2_1/install/soc_edge_wevb_emmc/fip.bin .
@@ -77,6 +78,15 @@ usb update 目录结构
     echo 1 > /sys/block/mmcblk0boot0/force_ro
     reboot
     EOF
+    ```
+#### BM1684X
+- 拉去编译更新之后的 `fip.bin` 到当前目录
+    ```bash 
+    scp lzx@192.168.5.223:/data/users/lzx/work/SOPHGO/BM1684/v24/bsp_code/install/soc_bm1684/fip.bin ./
+    ```
+- 在当前目录下执行
+    ```bash
+    sudo flash_update -f fip.bin -b 0x6000000 -o 0x40000
     ```
 
 ### 更新kernel
