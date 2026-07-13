@@ -24,6 +24,7 @@ log() {
     echo "$(date): $1" >> /var/log/quectel-setup.log
 }
 
+# 启用拨号程序
 start_quectel_cm() {
     if ! command -v quectel-CM >/dev/null 2>&1; then
         log "WARNING: quectel-CM not found"
@@ -47,6 +48,7 @@ start_quectel_cm() {
     return 0
 }
 
+# 等待设备就绪
 wait_for_device() {
     log "Waiting for device $DEVICE to be ready..."
     local counter=0
@@ -72,6 +74,7 @@ wait_for_device() {
     return 0
 }
 
+# 发送 AT 命令初始化模块
 setup_module() { 
     log "Setting up Quectel module..."
 
@@ -168,6 +171,7 @@ wait_for_ipv4() {
     [ -n "$(get_iface_ipv4 "$iface")" ]
 }
 
+# 运行 DHCP 客户端
 run_dhcp() {
     local iface=$1
 	local udhcpc_script=""
@@ -204,6 +208,7 @@ run_dhcp() {
     install_fallback_dns || true
 }
 
+# 查找 ncm 网络接口
 find_ncm_ifaces() {
     local iface
     local driver
@@ -258,6 +263,7 @@ wait_for_ncm_iface() {
     return 0
 }
 
+# 设置网络
 setup_network() {
     local iface
     local found=0
@@ -283,6 +289,7 @@ setup_network() {
     return 0
 }
 
+# 链接 5G 设备
 connect_quectel() {
     wait_for_device || return 1
     wait_for_ncm_iface || return 1

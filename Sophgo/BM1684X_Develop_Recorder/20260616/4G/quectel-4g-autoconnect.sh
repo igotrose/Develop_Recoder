@@ -33,6 +33,7 @@ find_cmd() {
     return 1
 }
 
+# 判断指定 USB 设备是否存在
 usb_id_present() {
     local vid=$1
     local pid=$2
@@ -49,6 +50,7 @@ usb_id_present() {
     return 1
 }
 
+# 判断是否为 4G 模块
 is_4g_module() {
     usb_id_present 2c7c 0125 || usb_id_present 2c7c 0121 || usb_id_present 05c6 9215
 }
@@ -57,6 +59,7 @@ compact_text() {
     tr '\r\n' ' ' | sed 's/[[:space:]][[:space:]]*/ /g; s/^ //; s/ $//'
 }
 
+# 发送 AT 命令并返回响应
 send_at() {
     local port=$1
     local command=$2
@@ -105,6 +108,7 @@ log_at() {
     log "$command response: $(printf '%s' "$response" | compact_text)"
 }
 
+# 查找 AT 接口
 find_at_port() {
     local port
     local response
@@ -129,6 +133,7 @@ find_at_port() {
     return 1
 }
 
+# 初始化模块 AT 指令
 setup_module_at() {
     local apn=${QUECTEL_4G_APN:-}
     local port
@@ -155,6 +160,7 @@ setup_module_at() {
     fi
 }
 
+# 获取 USB 网络接口，默认是 wwan0
 get_iface_driver() {
     local iface=$1
     local driver_path
@@ -163,6 +169,7 @@ get_iface_driver() {
     echo "${driver_path##*/}"
 }
 
+# 等待 4G WWAN 接口就绪
 wait_for_wwan_ready() {
     local counter=0
 
@@ -180,21 +187,25 @@ wait_for_wwan_ready() {
     return 1
 }
 
+# 获取接口的 IPv4 地址
 get_iface_ipv4() {
     local iface=$1
 
     ip -4 -o addr show dev "$iface" scope global 2>/dev/null | awk 'NR == 1 {print $4}'
 }
 
+# 查看 4G WWAN 链接状态
 wwan_is_connected() {
     [ -d "/sys/class/net/$NET_IFACE" ] || return 1
     [ -n "$(get_iface_ipv4 "$NET_IFACE")" ]
 }
 
+# 查看是由有默认路由
 has_default_route() {
     ip route show default 2>/dev/null | grep -q '^default '
 }
 
+# 安装默认路由
 install_default_route() {
     has_default_route && return 0
 
@@ -205,6 +216,7 @@ install_default_route() {
     }
 }
 
+# 查看是否有 DNS 服务器
 has_external_dns() {
     awk '
         /^[[:space:]]*nameserver[[:space:]]+/ {
@@ -214,6 +226,7 @@ has_external_dns() {
     ' /etc/resolv.conf 2>/dev/null
 }
 
+# 安装默认 DNS 服务器
 install_fallback_dns() {
     local ns
 
@@ -255,6 +268,7 @@ wait_for_ipv4() {
     wwan_is_connected
 }
 
+# 运行 DHCP 客户端以获取 IP 地址
 run_dhcp() {
     local udhcpc_script=""
 
@@ -294,6 +308,9 @@ run_dhcp() {
     ensure_network_defaults
 }
 
+# `set_qmi_raw_ip()` 用于将 QMI 网卡切换到 raw-ip 数据格式。
+# QMI 模式下 `wwan0` 可能工作在 802.3 或 raw-ip 两种格式，Quectel 4G 模块通常需要 raw-ip。
+# 脚本先将 `wwan0` down 掉，再向 `/sys/class/net/wwan0/qmi/raw_ip` 写入 `Y`，之后再重新 up 网卡并启动 QMI 数据会话。
 set_qmi_raw_ip() {
     local raw_ip="/sys/class/net/$NET_IFACE/qmi/raw_ip"
 
@@ -307,6 +324,7 @@ set_qmi_raw_ip() {
     fi
 }
 
+# 启动拨号
 start_quectel_cm() {
     local cm_bin
     local apn=${QUECTEL_4G_APN:-}
@@ -334,6 +352,7 @@ start_quectel_cm() {
     fi
 }
 
+# 启动备用拨号方式
 start_qmicli() {
     local qmicli_bin
     local apn=${QUECTEL_4G_APN:-}
@@ -379,6 +398,7 @@ start_qmicli() {
     fi
 }
 
+# 启动 QMI 数据会话
 start_qmi_session() {
     local driver
 
@@ -400,6 +420,7 @@ start_qmi_session() {
     return 1
 }
 
+# 启动 4G WWAN 链接
 start_wwan() {
     local driver
 
@@ -459,6 +480,7 @@ stop_wwan() {
     ip link set "$NET_IFACE" down >/dev/null 2>&1 || true
 }
 
+# 监控 4G WWAN 链接状态
 monitor_4g() {
     local fail_count=0
     local sleep_time

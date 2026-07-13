@@ -6,8 +6,10 @@
 #include <linux/of.h>
 #include <linux/completion.h>
 #include <linux/wait.h>
-#include <linux/serial.h> 
+#include <linux/serial.h>
 #include <linux/delay.h>
+#include <linux/kernel.h>
+#include <linux/string.h>
 
 
 
@@ -17,6 +19,7 @@
 #define AIOS_INIT_TIMEOUT_MS    1000
 #define AIOS_INIT_RETRIES       5
 #define AIOS_FALLBACK_BAUDRATE  9600
+#define AIOS_INIT_DELAY_MS      200
 
 #define AIOS_FW_DIR_UNKNOWN     0
 #define AIOS_FW_DIR_INPUT       1
@@ -90,16 +93,16 @@ static int aios_gpio_fw_direction_to_gpio(u8 direction)
 // 接收数据处理函数
 
 // 优化后的接收数据处理函数
-static int aios_gpio_recv(struct serdev_device *serdev, 
+static int aios_gpio_recv(struct serdev_device *serdev,
                          const u8 *data, size_t count)
 {
     struct aios_gpio_data *priv = serdev_device_get_drvdata(serdev);
     size_t copy, frame_len;
     int i, frame_start;
 
-    if (!priv || !count) 
+    if (!priv || !count)
         return 0;
-        
+
     dev_info(&serdev->dev, "received %zu bytes\n", count);
     print_hex_dump(KERN_INFO, "aios_gpio rx: ", DUMP_PREFIX_OFFSET,
                    16, 1, data, count, true);
@@ -172,39 +175,39 @@ static int aios_gpio_recv(struct serdev_device *serdev,
 
 
 /*
-static int aios_gpio_recv(struct serdev_device *serdev, 
+static int aios_gpio_recv(struct serdev_device *serdev,
                          const u8 *data, size_t count)
 {
     struct aios_gpio_data *priv = serdev_device_get_drvdata(serdev);
     int i;
     u8 payload_len ;
-    if (!count) 
+    if (!count)
         return 0;
-        
+
     // 查找命令起始标志 'S' (0x53)
     for (i = 0; i < count; i++) {
         if (data[i] == AIOS_CMD_START) {
             return i;  // 返回命令起始位置
         }
     }
-    
+
     // 处理完整命令包
     if (count >= 5 && data[0] == AIOS_CMD_START) {
         payload_len = data[2];
-        
+
         if (count >= payload_len + 3) {
             // 拷贝接收数据到缓冲区
             memcpy(priv->rx_buffer, data, payload_len + 3);
-            
+
             // 更新GPIO状态
             // 这里会根据命令类型更新gpio_values和gpio_directions
-            
+
             // 完成等待
             complete(&priv->completion);
             return payload_len + 3;
         }
     }
-    
+
     return 0;
 }
 */
@@ -228,7 +231,7 @@ static int aios_gpio_write_timeout(struct aios_gpio_data *priv, const u8 *data,
         timeout = 1;
 
     mutex_lock(&priv->lock);
-    
+
     // 重置完成量
     reinit_completion(&priv->completion);
     priv->frame_len = 0;
@@ -236,20 +239,20 @@ static int aios_gpio_write_timeout(struct aios_gpio_data *priv, const u8 *data,
     // 发送数据
     ret = serdev_device_write(priv->serdev, data, len, timeout);
     if (ret < 0){
-        printk(KERN_ERR "aios_gpio: write failed: %d\n", ret);
+        dev_dbg(&priv->serdev->dev, "aios_gpio: write did not complete\n");
         goto out_unlock;
     }
-    if (ret != len) {
+    if (ret != (int)len) {
         printk(KERN_ERR "aios_gpio: short write: %d/%zu\n", ret, len);
         ret = -EIO;
         goto out_unlock;
     }
-        
+
     // 等待发送完成
     serdev_device_wait_until_sent(priv->serdev, timeout);
-        
+
     // 等待响应超时
-    if (!wait_for_completion_timeout(&priv->completion, 
+    if (!wait_for_completion_timeout(&priv->completion,
                                     timeout)) {
         ret = -ETIMEDOUT;
         goto out_unlock;
@@ -279,7 +282,7 @@ static int aios_gpio_query_direction(struct gpio_chip *chip, unsigned offset)
         offset,                     // GPIO偏移
         0x0D, 0x0A                // 结束标志
     };
-    
+
     dev_info(&priv->serdev->dev, "get_direction: offset %d\n", offset);
 
     if (offset >= priv->ngpios)
@@ -306,7 +309,7 @@ static int aios_gpio_gpio_set_config(struct gpio_chip *chip,
         AIOS_FW_DIR_OUTPUT,   // 配置参数
         0x0D, 0x0A          // 结束标志
     };
-    
+
     dev_info(&priv->serdev->dev,"set_config : offset %d\n param %d \n" , offset,pinconf_to_config_param(config));
 
     if (offset >= priv->ngpios)
@@ -325,7 +328,7 @@ static int aios_gpio_gpio_set_config(struct gpio_chip *chip,
         case PIN_CONFIG_DRIVE_PUSH_PULL:
             return 0;
         default:
-            dev_err(&priv->serdev->dev,"Unsupported config param: %u\n", 
+            dev_err(&priv->serdev->dev,"Unsupported config param: %u\n",
                     pinconf_to_config_param(config));
             return -ENOTSUPP;
     }
@@ -375,11 +378,11 @@ static int aios_gpio_gpio_get_value(struct gpio_chip *chip,
     struct aios_gpio_data *priv = gpiochip_get_data(chip);
     u8 cmd[] = {
         AIOS_CMD_START,
-        AIOS_CMD_READ,  // 获取值命令    
+        AIOS_CMD_READ,  // 获取值命令
         0x01,           // 数据长度
         offset,          // GPIO偏移
         0x0D, 0x0A
-    };  
+    };
     int ret ;
 
     // 检查偏移是否有效
@@ -410,7 +413,7 @@ static int aios_gpio_gpio_direction_output(struct gpio_chip *chip,
         0x02,               // 方向: 输出
         0x0D, 0x0A
     };
-    
+
     dev_info(&priv->serdev->dev,"set_output : offset %d\n", offset);
     ret = aios_gpio_write(priv, cmd, sizeof(cmd));
     if (ret < 0)
@@ -436,7 +439,7 @@ static int aios_gpio_gpio_direction_input(struct gpio_chip *chip,
         offset,
         0x01,                // 方向: 输入
         0x0D, 0x0A
-    }; 
+    };
     dev_info(&priv->serdev->dev,"set_input : offset %d\n", offset);
     ret = aios_gpio_write(priv, cmd, sizeof(cmd));
     if (ret < 0)
@@ -449,14 +452,18 @@ static int aios_gpio_gpio_direction_input(struct gpio_chip *chip,
 }
 
 
-static int aios_init(struct aios_gpio_data *priv)
+static int aios_init(struct aios_gpio_data *priv, bool auto_baudrate)
 {
+    u8 sync_train[] = {
+        0x55, 0x55, 0x55, 0x55,
+        0x0D, 0x0A
+    };
     u8 init_cmd[] = {
         0x55,
         AIOS_CMD_START,  // 0x53
         AIOS_CMD_INIT,   // 'i' - 初始化
         0x00,
-        0x0D, 0x0A       // CR  // LF            
+        0x0D, 0x0A       // CR  // LF
     };
     u8 init_dir_cmd[] = {
         AIOS_CMD_START,              // 0x53
@@ -471,18 +478,28 @@ static int aios_init(struct aios_gpio_data *priv)
     if (init_timeout < AIOS_INIT_TIMEOUT_MS)
         init_timeout = AIOS_INIT_TIMEOUT_MS;
 
+    if (auto_baudrate) {
+        ret = serdev_device_write(priv->serdev, sync_train,
+                                  sizeof(sync_train),
+                                  msecs_to_jiffies(init_timeout));
+        if (ret >= 0)
+            serdev_device_wait_until_sent(priv->serdev,
+                                          msecs_to_jiffies(init_timeout));
+        msleep(20);
+    }
+
     for (i = 0; i < AIOS_INIT_RETRIES; i++) {
         ret = aios_gpio_write_timeout(priv, init_cmd, sizeof(init_cmd),
                                       init_timeout);
         if (!ret)
             break;
 
-        printk(KERN_WARNING "aios_gpio,Initialization: command retry %d/%d failed: %d\n",
-               i + 1, AIOS_INIT_RETRIES, ret);
+        dev_dbg(&priv->serdev->dev,
+                "aios_gpio: init retry %d/%d\n",
+                i + 1, AIOS_INIT_RETRIES);
         msleep(200);
     }
     if (ret < 0) {
-        printk(KERN_ERR "aios_gpio,Initialization:  command failed: %d\n", ret);
         return ret;
     }
 
@@ -491,8 +508,11 @@ static int aios_init(struct aios_gpio_data *priv)
         init_dir_cmd[3] = i;
         ret = aios_gpio_write(priv, init_dir_cmd, sizeof(init_dir_cmd));
         if (ret < 0) {
-            printk(KERN_ERR "aios_gpio,Initialization: Failed to query direction for GPIO %d: %d\n", i, ret);
-            return ret;
+            dev_dbg(&priv->serdev->dev,
+                    "aios_gpio: direction cache unavailable for GPIO %d\n",
+                    i);
+            priv->gpio_directions[i] = AIOS_FW_DIR_UNKNOWN;
+            continue;
         }
     }
     return 0;
@@ -510,8 +530,9 @@ static int aios_gpio_probe(struct serdev_device *serdev)
     struct aios_gpio_data *priv;
     struct device_node *np = dev->of_node;
     u32 baudrate = 115200;
+    bool auto_baudrate;
     int ret;
-    
+
     dev_info(dev, "Starting AIOS GPIO probe\n");
 
     // 检查serdev设备是否有效
@@ -524,22 +545,28 @@ static int aios_gpio_probe(struct serdev_device *serdev)
     priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
     if (!priv)
         return -ENOMEM;
-    
+
     priv->serdev = serdev;
     serdev_device_set_drvdata(serdev, priv);
-    
+
     // 从设备树读取配置
     of_property_read_u32(np, "current-speed", &baudrate);
     of_property_read_u32(np, "ngpios", &priv->ngpios);
     of_property_read_u32(np, "cmd-timeout", &priv->timeout_ms);
+    auto_baudrate = of_property_read_bool(np, "auto-baudrate");
 
     if (!priv->timeout_ms)
         priv->timeout_ms = AIOS_DEFAULT_TIMEOUT_MS;
+    else if (priv->timeout_ms < AIOS_DEFAULT_TIMEOUT_MS) {
+        dev_dbg(dev, "command wait %u ms too small, using %u ms\n",
+                 priv->timeout_ms, AIOS_DEFAULT_TIMEOUT_MS);
+        priv->timeout_ms = AIOS_DEFAULT_TIMEOUT_MS;
+    }
     if (!priv->ngpios || priv->ngpios > ARRAY_SIZE(priv->gpio_values)) {
         dev_err(dev, "Invalid ngpios: %d\n", priv->ngpios);
         return -EINVAL;
     }
-    dev_info(dev, "AIOS GPIO config: baudrate=%u timeout=%u ngpios=%u\n",
+    dev_info(dev, "AIOS GPIO config: baudrate=%u wait=%u ngpios=%u\n",
              baudrate, priv->timeout_ms, priv->ngpios);
 
     // 初始化完成量和等待队列
@@ -555,14 +582,15 @@ static int aios_gpio_probe(struct serdev_device *serdev)
         return ret;
     }
     dev_info(dev, "Serdev device opened successfully\n");
-    
+
 
     // 配置串行设备
     serdev_device_set_baudrate(serdev, baudrate);
     serdev_device_set_flow_control(serdev, false);
     serdev_device_set_parity(serdev, SERDEV_PARITY_NONE);
     dev_info(dev, "Serial device configured: %d baud, no flow control, no parity\n", baudrate);
-    
+    msleep(AIOS_INIT_DELAY_MS);
+ 
     // 设置接收回调
    // serdev_device_set_receive_buf(serdev, aios_gpio_recv);
     /*   if (!serdev->ops) {
@@ -589,20 +617,23 @@ static int aios_gpio_probe(struct serdev_device *serdev)
     priv->gpio_chip.set = aios_gpio_gpio_set_value;
     priv->gpio_chip.set_config = aios_gpio_gpio_set_config;
     priv->gpio_chip.can_sleep = true;
-  
 
-    ret = aios_init(priv);
+
+    ret = aios_init(priv, auto_baudrate);
     if (ret < 0 && baudrate != AIOS_FALLBACK_BAUDRATE) {
-        dev_warn(dev, "AIOS init failed at %u baud: %d, retrying at %u baud\n",
-                 baudrate, ret, AIOS_FALLBACK_BAUDRATE);
+        dev_info(dev, "AIOS init at %u baud did not respond, trying %u baud\n",
+                 baudrate, AIOS_FALLBACK_BAUDRATE);
+        serdev_device_write_flush(serdev);
+        priv->frame_len = 0;
+        priv->rx_len = 0;
         serdev_device_set_baudrate(serdev, AIOS_FALLBACK_BAUDRATE);
-        msleep(200);
-        ret = aios_init(priv);
+        msleep(AIOS_INIT_DELAY_MS);
+        ret = aios_init(priv, auto_baudrate);
     }
     if (ret < 0) {
         dev_err(dev, "Failed to initialize AIOS GPIO device: %d\n", ret);
         goto err_close;
-    }   
+    }
 
 /*
     // 发送初始化命令
@@ -611,7 +642,7 @@ static int aios_gpio_probe(struct serdev_device *serdev)
         dev_err(dev, "Initialization command failed: %d\n", ret);
         goto err_close;
     }
-*/ 
+*/
 
     // 注册GPIO芯片
     ret = devm_gpiochip_add_data(dev, &priv->gpio_chip, priv);
@@ -619,10 +650,10 @@ static int aios_gpio_probe(struct serdev_device *serdev)
         dev_err(dev, "Failed to register GPIO chip: %d\n", ret);
         goto err_close;
     }
-    
+
     dev_info(dev, "AIOS GPIO expander probed, %d GPIOs\n", priv->ngpios);
     return 0;
-    
+
 err_close:
     serdev_device_close(serdev);
     return ret;
@@ -632,16 +663,11 @@ err_close:
 static void aios_gpio_remove(struct serdev_device *serdev)
 {
     struct aios_gpio_data *priv = serdev_device_get_drvdata(serdev);
-    u8 shutdown_cmd[] = {0x53, 0x49, 0x0D, 0x0A}; // 关闭命令
-    
-    if (priv->ngpios > 0) {
-        // 发送关闭命令
-        serdev_device_write_buf(serdev, shutdown_cmd, sizeof(shutdown_cmd));
-        serdev_device_wait_until_sent(serdev, 0);
-    }
-    
+
+    serdev_device_write_flush(serdev);
     serdev_device_close(serdev);
-    priv->serdev = NULL;
+    if (priv)
+        priv->serdev = NULL;
 }
 
 
@@ -667,4 +693,4 @@ module_serdev_device_driver(aios_gpio_driver);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("AIOS UART protocol GPIO expander");
-MODULE_AUTHOR("Leslie ling <qiupeiqin@cs-t.cn>");
+MODULE_AUTHOR("Gotu Qiu <qiupeiqin@cs-t.cn>");

@@ -1,14 +1,18 @@
 #ifndef _AIOS_GPIO_H
 #define _AIOS_GPIO_H
 
+#include <linux/completion.h>
 #include <linux/gpio/consumer.h>
+#include <linux/gpio/driver.h>
 #include <linux/serdev.h>
 #include <linux/mutex.h>
+#include <linux/wait.h>
+#include <linux/stddef.h>
 
 #define AIOS_CMD_START         0x53  // 'S'
 #define AIOS_CMD_DIRECTION_QUERY    0x44  // 'D'
 #define AIOS_CMD_CONFIG             0x43  // 'C'
-#define AIOS_CMD_OUTPUT              0x4F  // 'W'
+#define AIOS_CMD_OUTPUT              0x4F  // 'O'
 #define AIOS_CMD_READ               0x52  // 'R'
 #define AIOS_CMD_INIT               0x69  // 'i'
 //#define AIOS_CMD_END                (0x0D, 0x0A)  // CR LF
