@@ -1,0 +1,33 @@
+# Common Quectel 4G/5G auto-connect defaults.
+# QUECTEL_MODE can be auto, 4g/qmi, or 5g/ncm.
+QUECTEL_MODE=auto
+
+# Leave AT_DEVICE unset to auto-detect /dev/serial/by-id/*Quectel* or /dev/ttyUSB*.
+# QUECTEL_AT_DEVICE=/dev/ttyUSB2
+QUECTEL_BAUDRATE=115200
+
+# 4G QMI path.
+QUECTEL_QMI_IFACE=wwan0
+QUECTEL_WDM_DEVICE=/dev/cdc-wdm0
+
+# Add module IDs as vid:pid. Wildcard pid is supported, for example 2c7c:*.
+QUECTEL_4G_USB_IDS="2c7c:0125 2c7c:0121 05c6:9215"
+QUECTEL_5G_USB_IDS="2c7c:0900"
+
+# Leave APN empty to use the SIM/module default PDP context.
+# QUECTEL_APN=internet
+
+# Used when the modem/DHCP path does not populate DNS.
+QUECTEL_FALLBACK_DNS="114.114.114.114 223.5.5.5"
+
+# Timing knobs.
+QUECTEL_DEVICE_TIMEOUT=30
+QUECTEL_NCM_IFACE_TIMEOUT=180
+QUECTEL_NCM_CARRIER_TIMEOUT=480
+QUECTEL_MONITOR_INTERVAL=10
+QUECTEL_NET_START_GRACE=5
+QUECTEL_DHCP_TIMEOUT=30
+QUECTEL_MAX_RETRY_INTERVAL=60
+
+QUECTEL_LOG_FILE=/var/log/quectel-autoconnect.log
+QUECTEL_QMI_STATE_FILE=/run/quectel-qmi.state

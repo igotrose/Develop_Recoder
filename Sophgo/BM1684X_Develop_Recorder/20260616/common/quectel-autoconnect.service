@@ -1,0 +1,18 @@
+[Unit]
+Description=Quectel 4G/5G Auto Connect
+After=systemd-udev-settle.service network.target
+Wants=systemd-udev-settle.service
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/quectel-autoconnect
+ExecStart=/usr/sbin/quectel-autoconnect.sh monitor
+ExecStop=/usr/sbin/quectel-autoconnect.sh stop
+ExecReload=/usr/sbin/quectel-autoconnect.sh restart
+Restart=always
+RestartSec=10
+TimeoutStartSec=20
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target
