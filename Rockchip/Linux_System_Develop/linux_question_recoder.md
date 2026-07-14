@@ -2107,4 +2107,9 @@ update-binfmts --display qemu-aarch64
         };
     };
     ```
-### RK3588 + BM1684X 用户态 + 驱动层修改
+### `lspci` 设备标签补全
+内核负责发现设备，每个 PCI 设备都会有一组标准 ID，`Vendor ID` 和 `Device ID`，`lspci` 运行时会先去拿这个数字，再去查 `pci.ids`，所以如果接入一个设备，但是里面没有显示具体描述，就可以说明这个表单里面没有对于设备数据，我们修改这个表添加数据，重新 `lspci` 就可以了
+    ```text
+    1f1c  Sophon Technologies
+        1686  BM1684X Accelerator
+    ```
