@@ -1,9 +1,12 @@
 #!/bin/bash
 
 AT_DEVICE="${QUECTEL_4G_AT_DEVICE:-}"
-NET_IFACE="${QUECTEL_4G_NET_IFACE:-wwan0}"
+NET_IFACE_REQUEST="${QUECTEL_4G_NET_IFACE:-auto}"
+NET_IFACE="$NET_IFACE_REQUEST"
 WDM_DEVICE="${QUECTEL_4G_WDM_DEVICE:-/dev/cdc-wdm0}"
+QNETDEVCTL="${QUECTEL_4G_QNETDEVCTL:-auto}"
 BAUDRATE="${QUECTEL_4G_BAUDRATE:-115200}"
+AT_PROBE_TIMEOUT="${QUECTEL_4G_AT_PROBE_TIMEOUT:-3}"
 DEVICE_TIMEOUT="${QUECTEL_4G_DEVICE_TIMEOUT:-30}"
 MONITOR_INTERVAL="${QUECTEL_4G_MONITOR_INTERVAL:-10}"
 NET_START_GRACE="${QUECTEL_4G_NET_START_GRACE:-5}"
@@ -33,7 +36,6 @@ find_cmd() {
     return 1
 }
 
-# 判断指定 USB 设备是否存在
 usb_id_present() {
     local vid=$1
     local pid=$2
@@ -50,16 +52,17 @@ usb_id_present() {
     return 1
 }
 
-# 判断是否为 4G 模块
 is_4g_module() {
-    usb_id_present 2c7c 0125 || usb_id_present 2c7c 0121 || usb_id_present 05c6 9215
+    usb_id_present 2c7c 0125 || \
+        usb_id_present 2c7c 0121 || \
+        usb_id_present 2c7c 6005 || \
+        usb_id_present 05c6 9215
 }
 
 compact_text() {
     tr '\r\n' ' ' | sed 's/[[:space:]][[:space:]]*/ /g; s/^ //; s/ $//'
 }
 
-# 发送 AT 命令并返回响应
 send_at() {
     local port=$1
     local command=$2
@@ -70,7 +73,8 @@ send_at() {
 
     [ -c "$port" ] || return 1
 
-    stty -F "$port" "$BAUDRATE" raw -echo -echoe -echok 2>/dev/null || return 1
+    stty -F "$port" "$BAUDRATE" raw -echo -echoe -echok -ixon -ixoff -crtscts 2>/dev/null || \
+        stty -F "$port" "$BAUDRATE" raw -echo -echoe -echok 2>/dev/null || true
 
     exec 3<>"$port" || return 1
     printf '%s\r' "$command" >&3
@@ -108,7 +112,6 @@ log_at() {
     log "$command response: $(printf '%s' "$response" | compact_text)"
 }
 
-# 查找 AT 接口
 find_at_port() {
     local port
     local response
@@ -118,22 +121,47 @@ find_at_port() {
         return 1
     fi
 
-    for port in /dev/serial/by-id/*Quectel* /dev/ttyUSB2 /dev/ttyUSB3 /dev/ttyUSB1 /dev/ttyUSB0; do
-        [ -e "$port" ] || continue
-        port=$(readlink -f "$port")
-        [ -c "$port" ] || continue
-
-        response=$(send_at "$port" AT 2 2>/dev/null) || continue
+    while IFS= read -r port; do
+        response=$(send_at "$port" AT "$AT_PROBE_TIMEOUT" 2>/dev/null) || {
+            log "AT probe failed on $port"
+            continue
+        }
         if echo "$response" | grep -q OK; then
             echo "$port"
             return 0
         fi
-    done
+
+        log "AT probe no OK on $port: $(printf '%s' "$response" | compact_text)"
+    done <<EOF
+$(at_port_candidates)
+EOF
 
     return 1
 }
 
-# 初始化模块 AT 指令
+at_port_candidates() {
+    local port
+    local real_port
+    local seen=""
+
+    for port in /dev/serial/by-id/*Quectel* \
+        /dev/ttyUSB2 /dev/ttyUSB1 /dev/ttyUSB3 /dev/ttyUSB0 \
+        /dev/ttyACM2 /dev/ttyACM1 /dev/ttyACM3 /dev/ttyACM0; do
+        [ -e "$port" ] || continue
+        real_port=$(readlink -f "$port")
+        [ -c "$real_port" ] || continue
+
+        case " $seen " in
+            *" $real_port "*)
+                continue
+                ;;
+        esac
+
+        seen="$seen $real_port"
+        echo "$real_port"
+    done
+}
+
 setup_module_at() {
     local apn=${QUECTEL_4G_APN:-}
     local port
@@ -160,7 +188,6 @@ setup_module_at() {
     fi
 }
 
-# 获取 USB 网络接口，默认是 wwan0
 get_iface_driver() {
     local iface=$1
     local driver_path
@@ -169,12 +196,85 @@ get_iface_driver() {
     echo "${driver_path##*/}"
 }
 
-# 等待 4G WWAN 接口就绪
+usb_id_supported() {
+    local vid=$1
+    local pid=$2
+
+    case "$vid:$pid" in
+        2c7c:0125|2c7c:0121|2c7c:6005|05c6:9215)
+            return 0
+            ;;
+    esac
+
+    return 1
+}
+
+sysfs_path_has_supported_usb_id() {
+    local path
+    local vid
+    local pid
+
+    path=$(readlink -f "$1" 2>/dev/null) || return 1
+
+    while [ -n "$path" ] && [ "$path" != "/" ]; do
+        if [ -r "$path/idVendor" ] && [ -r "$path/idProduct" ]; then
+            vid=$(cat "$path/idVendor")
+            pid=$(cat "$path/idProduct")
+            usb_id_supported "$vid" "$pid" && return 0
+        fi
+
+        path=${path%/*}
+    done
+
+    return 1
+}
+
+iface_is_4g_module_net() {
+    local iface=$1
+
+    sysfs_path_has_supported_usb_id "/sys/class/net/$iface/device"
+}
+
+net_iface_auto_requested() {
+    [ -z "$NET_IFACE_REQUEST" ] || [ "$NET_IFACE_REQUEST" = "auto" ]
+}
+
+detect_net_iface() {
+    local iface
+    local driver
+
+    if ! net_iface_auto_requested; then
+        if [ -d "/sys/class/net/$NET_IFACE_REQUEST" ]; then
+            NET_IFACE="$NET_IFACE_REQUEST"
+            return 0
+        fi
+
+        log "Configured 4G network interface is missing: $NET_IFACE_REQUEST, trying auto-detect"
+    fi
+
+    for iface in /sys/class/net/wwan* /sys/class/net/wwx* /sys/class/net/usb* /sys/class/net/enx*; do
+        [ -d "$iface" ] || continue
+        iface=${iface##*/}
+        driver=$(get_iface_driver "$iface" 2>/dev/null || echo unknown)
+
+        case "$driver" in
+            qmi_wwan|cdc_ether|rndis_host|cdc_ncm|cdc_mbim)
+                iface_is_4g_module_net "$iface" || continue
+                NET_IFACE="$iface"
+                log "Auto-selected 4G network interface: $NET_IFACE, driver=$driver"
+                return 0
+                ;;
+        esac
+    done
+
+    return 1
+}
+
 wait_for_wwan_ready() {
     local counter=0
 
     while [ "$counter" -lt "$DEVICE_TIMEOUT" ]; do
-        if is_4g_module && [ -d "/sys/class/net/$NET_IFACE" ]; then
+        if is_4g_module && detect_net_iface; then
             log "4G WWAN interface ready: $NET_IFACE, driver=$(get_iface_driver "$NET_IFACE" 2>/dev/null || echo unknown)"
             return 0
         fi
@@ -187,25 +287,21 @@ wait_for_wwan_ready() {
     return 1
 }
 
-# 获取接口的 IPv4 地址
 get_iface_ipv4() {
     local iface=$1
 
     ip -4 -o addr show dev "$iface" scope global 2>/dev/null | awk 'NR == 1 {print $4}'
 }
 
-# 查看 4G WWAN 链接状态
 wwan_is_connected() {
     [ -d "/sys/class/net/$NET_IFACE" ] || return 1
     [ -n "$(get_iface_ipv4 "$NET_IFACE")" ]
 }
 
-# 查看是由有默认路由
 has_default_route() {
     ip route show default 2>/dev/null | grep -q '^default '
 }
 
-# 安装默认路由
 install_default_route() {
     has_default_route && return 0
 
@@ -216,7 +312,6 @@ install_default_route() {
     }
 }
 
-# 查看是否有 DNS 服务器
 has_external_dns() {
     awk '
         /^[[:space:]]*nameserver[[:space:]]+/ {
@@ -226,7 +321,6 @@ has_external_dns() {
     ' /etc/resolv.conf 2>/dev/null
 }
 
-# 安装默认 DNS 服务器
 install_fallback_dns() {
     local ns
 
@@ -268,7 +362,6 @@ wait_for_ipv4() {
     wwan_is_connected
 }
 
-# 运行 DHCP 客户端以获取 IP 地址
 run_dhcp() {
     local udhcpc_script=""
 
@@ -308,9 +401,6 @@ run_dhcp() {
     ensure_network_defaults
 }
 
-# `set_qmi_raw_ip()` 用于将 QMI 网卡切换到 raw-ip 数据格式。
-# QMI 模式下 `wwan0` 可能工作在 802.3 或 raw-ip 两种格式，Quectel 4G 模块通常需要 raw-ip。
-# 脚本先将 `wwan0` down 掉，再向 `/sys/class/net/wwan0/qmi/raw_ip` 写入 `Y`，之后再重新 up 网卡并启动 QMI 数据会话。
 set_qmi_raw_ip() {
     local raw_ip="/sys/class/net/$NET_IFACE/qmi/raw_ip"
 
@@ -324,7 +414,6 @@ set_qmi_raw_ip() {
     fi
 }
 
-# 启动拨号
 start_quectel_cm() {
     local cm_bin
     local apn=${QUECTEL_4G_APN:-}
@@ -352,7 +441,6 @@ start_quectel_cm() {
     fi
 }
 
-# 启动备用拨号方式
 start_qmicli() {
     local qmicli_bin
     local apn=${QUECTEL_4G_APN:-}
@@ -398,7 +486,6 @@ start_qmicli() {
     fi
 }
 
-# 启动 QMI 数据会话
 start_qmi_session() {
     local driver
 
@@ -420,7 +507,89 @@ start_qmi_session() {
     return 1
 }
 
-# 启动 4G WWAN 链接
+qnetdevctl_enabled() {
+    local driver=$1
+
+    case "$QNETDEVCTL" in
+        1|yes|true|on)
+            return 0
+            ;;
+        0|no|false|off)
+            return 1
+            ;;
+        auto|"")
+            case "$driver" in
+                cdc_ether|rndis_host)
+                    return 0
+                    ;;
+            esac
+            ;;
+        *)
+            log "WARNING: Invalid QUECTEL_4G_QNETDEVCTL=$QNETDEVCTL, using auto"
+            case "$driver" in
+                cdc_ether|rndis_host)
+                    return 0
+                    ;;
+            esac
+            ;;
+    esac
+
+    return 1
+}
+
+start_at_netdev_session() {
+    local driver=$1
+    local port
+    local response
+
+    qnetdevctl_enabled "$driver" || return 0
+
+    if [ -c "$AT_DEVICE" ]; then
+        log "Starting ECM/RNDIS data call on $NET_IFACE with AT+QNETDEVCTL via $AT_DEVICE"
+        response=$(send_at "$AT_DEVICE" "AT+QNETDEVCTL=1,1,1" 10 2>/dev/null) || {
+            log "WARNING: AT+QNETDEVCTL failed on $AT_DEVICE"
+            return 1
+        }
+
+        log "AT+QNETDEVCTL=1,1,1 response: $(printf '%s' "$response" | compact_text)"
+        echo "$response" | grep -q OK
+        return $?
+    fi
+
+    if [ ! -c "$AT_DEVICE" ]; then
+        port=$(find_at_port) || {
+            log "WARNING: No AT port found by probe, trying AT+QNETDEVCTL on all candidates"
+            while IFS= read -r port; do
+                log "Trying AT+QNETDEVCTL=1,1,1 on $port"
+                response=$(send_at "$port" "AT+QNETDEVCTL=1,1,1" 10 2>/dev/null) || {
+                    log "WARNING: AT+QNETDEVCTL failed on $port"
+                    continue
+                }
+
+                log "AT+QNETDEVCTL=1,1,1 response on $port: $(printf '%s' "$response" | compact_text)"
+                if echo "$response" | grep -q OK; then
+                    AT_DEVICE="$port"
+                    return 0
+                fi
+            done <<EOF
+$(at_port_candidates)
+EOF
+
+            return 1
+        }
+        AT_DEVICE="$port"
+    fi
+
+    log "Starting ECM/RNDIS data call on $NET_IFACE with AT+QNETDEVCTL via $AT_DEVICE"
+    response=$(send_at "$AT_DEVICE" "AT+QNETDEVCTL=1,1,1" 10 2>/dev/null) || {
+        log "WARNING: AT+QNETDEVCTL failed on $AT_DEVICE"
+        return 1
+    }
+
+    log "AT+QNETDEVCTL=1,1,1 response: $(printf '%s' "$response" | compact_text)"
+    echo "$response" | grep -q OK
+}
+
 start_wwan() {
     local driver
 
@@ -435,6 +604,9 @@ start_wwan() {
     driver=$(get_iface_driver "$NET_IFACE" 2>/dev/null || echo unknown)
     if [ "$driver" = "qmi_wwan" ]; then
         start_qmi_session || return 1
+    else
+        start_at_netdev_session "$driver" || \
+            log "WARNING: Continuing DHCP after AT+QNETDEVCTL did not return OK"
     fi
 
     sleep "$NET_START_GRACE"
@@ -480,7 +652,6 @@ stop_wwan() {
     ip link set "$NET_IFACE" down >/dev/null 2>&1 || true
 }
 
-# 监控 4G WWAN 链接状态
 monitor_4g() {
     local fail_count=0
     local sleep_time

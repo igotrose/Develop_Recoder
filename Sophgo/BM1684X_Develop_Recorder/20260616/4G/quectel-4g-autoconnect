@@ -1,8 +1,15 @@
-# EC20/EC25 WWAN defaults. Override only if your board enumerates differently.
+# Set NET_IFACE=auto to select the Quectel USB network interface by USB ID.
+# EC20/EC25 usually enumerate as qmi_wwan/wwan0 and use /dev/cdc-wdm0.
+# EC200A usually enumerates as cdc_ether/usb0 or rndis_host/usb0.
 # Leave AT_DEVICE unset to auto-detect /dev/ttyUSB*.
 # QUECTEL_4G_AT_DEVICE=/dev/ttyUSB2
-QUECTEL_4G_NET_IFACE=wwan0
+QUECTEL_4G_NET_IFACE=auto
 QUECTEL_4G_WDM_DEVICE=/dev/cdc-wdm0
+
+# EC200A in ECM/RNDIS mode needs AT+QNETDEVCTL=1,1,1 before DHCP.
+# auto enables it only for cdc_ether/rndis_host interfaces, so EC20/EC25 QMI is
+# unaffected.
+# QUECTEL_4G_QNETDEVCTL=auto
 
 # Leave APN empty to use the SIM/module default PDP context.
 # Set it only for SIM cards that require an explicit APN.

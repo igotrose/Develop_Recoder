@@ -1,5 +1,5 @@
 [Unit]
-Description=Quectel EC20/EC25 4G WWAN Auto Connect
+Description=Quectel 4G WWAN Auto Connect
 After=systemd-udev-settle.service network.target
 Wants=systemd-udev-settle.service
 
