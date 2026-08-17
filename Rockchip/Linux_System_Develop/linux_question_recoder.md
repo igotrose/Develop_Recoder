@@ -2113,3 +2113,27 @@ update-binfmts --display qemu-aarch64
     1f1c  Sophon Technologies
         1686  BM1684X Accelerator
     ```
+
+## 2026-08-15
+### RK3588 + RK1828 PCIe/RKNN3 移植
+本次记录 RK3588 Linux 5.10.198 SDK 接入 RK1828 PCIe AI 协处理器的完整过程。主线是先补齐 Rockchip PCIe PM Control 能力，再用 RK182x SDK 中的新 `pcie-rkep` 驱动替换内核旧驱动，最后集成 RKNN3 Runtime、固件和 systemd 服务。
+
+- 详细记录：[RK3588_RK1828_PCIe移植笔记.md](20260815/RK3588_RK1828_PCIe移植笔记.md)
+- 参考资料：[Rockchip_RK1820_RK1828_AI_SDK_Quick_Start_CN.pdf](20260815/Rockchip_RK1820_RK1828_AI_SDK_Quick_Start_CN.pdf)
+- PCIe PM Control 补丁：[0001-rockchip-pcie-pm-control.patch](20260815/0001-rockchip-pcie-pm-control.patch)
+- PCIe IRQ mask/unmask 补丁：[0002-rockchip-pcie-mask-unmask-irq.patch](20260815/0002-rockchip-pcie-mask-unmask-irq.patch)
+
+关键结果：
+
+- RK1828 成功枚举为 `1d87:182a`。
+- 新版 `pcie-rkep` 驱动内置进内核并成功绑定。
+- 自动创建 `/dev/pcie-rkep-0000:01:00.0`。
+- `rknn3.service` 冷启动时自动下载 RK1828 固件。
+- `rknn-smi info` 显示 RK1828 `Online`、`Health OK`。
+- 当前 PCIe 链路协商结果为 Gen2 x1。
+
+后续注意：
+
+- RK1828 固件运行后不要直接 `systemctl restart rknn3`，否则可能因设备不在 MaskROM/Loader 状态而重新下载失败。
+- 需要重新加载固件时优先采用整机断电冷启动。
+- 当前驱动采用内核内置方式，后续打包只需要处理用户态 Runtime、固件、服务和工具，不需要单独携带 `pcie-rkep.ko`。

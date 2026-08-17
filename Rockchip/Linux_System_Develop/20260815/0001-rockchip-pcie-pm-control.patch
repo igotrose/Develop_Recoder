@@ -1,0 +1,89 @@
+From bb9632320ba730395891d0e645b273804baf1533 Mon Sep 17 00:00:00 2001
+From: Jon Lin <jon.lin@rock-chips.com>
+Date: Wed, 15 May 2024 10:44:41 +0800
+Subject: [PATCH] PCI: dw: rockchip: Support rockchip_dw_pcie_pm_ctrl_for_user
+
+Some PCIe devices have custom power management measures that do
+not rely on the PCIe framework, such as PCIe wifi, which rely on
+the reset of the PCIe controller to avoid or solve potential fault
+problems.
+
+Change-Id: I7bdb0bd9edfb837a03a12790521e71adc6cd99fe
+Signed-off-by: Jon Lin <jon.lin@rock-chips.com>
+---
+ drivers/pci/controller/dwc/pcie-dw-rockchip.c | 31 +++++++++++++++++++
+ include/linux/aspm_ext.h                      |  8 ++++-
+ 2 files changed, 38 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/pci/controller/dwc/pcie-dw-rockchip.c b/drivers/pci/controller/dwc/pcie-dw-rockchip.c
+index c411733d615ef..a7ccbebfa43f2 100644
+--- a/drivers/pci/controller/dwc/pcie-dw-rockchip.c
++++ b/drivers/pci/controller/dwc/pcie-dw-rockchip.c
+@@ -42,6 +42,7 @@
+ #include <linux/types.h>
+ #include <linux/uaccess.h>
+ #include <linux/pci-epf.h>
++#include <linux/aspm_ext.h>
+ 
+ #include "pcie-designware.h"
+ #include "../../pci.h"
+@@ -2484,6 +2485,36 @@ static int __maybe_unused rockchip_dw_pcie_resume(struct device *dev)
+ 	return ret;
+ }
+ 
++int rockchip_dw_pcie_pm_ctrl_for_user(struct pci_dev *dev, enum rockchip_pcie_pm_ctrl_flag flag)
++{
++	struct dw_pcie *pci;
++	struct rk_pcie *rk_pcie;
++
++	if (!dev || !dev->bus || !dev->bus->sysdata) {
++		pr_err("%s input invalid\n", __func__);
++		return -EINVAL;
++	}
++
++	pci = to_dw_pcie_from_pp((struct pcie_port *)(dev->bus->sysdata));
++	rk_pcie = to_rk_pcie(pci);
++
++	switch (flag) {
++	case ROCKCHIP_PCIE_PM_CTRL_RESET:
++		rockchip_dw_pcie_suspend(rk_pcie->pci->dev);
++		rockchip_dw_pcie_resume(rk_pcie->pci->dev);
++		break;
++	default:
++		dev_err(rk_pcie->pci->dev, "%s flag=%d invalid\n", __func__, flag);
++		return -EINVAL;
++	}
++
++	dev_info(rk_pcie->pci->dev, "%s ltssm=%x\n", __func__,
++		 rk_pcie_readl_apb(rk_pcie, PCIE_CLIENT_LTSSM_STATUS));
++
++	return 0;
++}
++EXPORT_SYMBOL(rockchip_dw_pcie_pm_ctrl_for_user);
++
+ #ifdef CONFIG_PCIEASPM
+ static int rockchip_dw_pcie_prepare(struct device *dev)
+ {
+diff --git a/include/linux/aspm_ext.h b/include/linux/aspm_ext.h
+index 1bd141e56a452..4160a203be03a 100644
+--- a/include/linux/aspm_ext.h
++++ b/include/linux/aspm_ext.h
+@@ -1,6 +1,6 @@
+ /* SPDX-License-Identifier: GPL-2.0 */
+ 
+-/* Copyright (c) 2022 Rockchip Electronics Co., Ltd. */
++/* Copyright (c) 2022-2024 Rockchip Electronics Co., Ltd. */
+ 
+ #ifndef _ASPM_EXT_H
+ #define _ASPM_EXT_H
+@@ -13,4 +13,10 @@ static inline bool pcie_aspm_ext_is_rc_ep_l1ss_capable(struct pci_dev *child, st
+ static inline void pcie_aspm_ext_l1ss_enable(struct pci_dev *child, struct pci_dev *parent, bool enable) {}
+ #endif
+ 
++enum rockchip_pcie_pm_ctrl_flag {
++	ROCKCHIP_PCIE_PM_CTRL_RESET = 1,
++};
++
++int rockchip_dw_pcie_pm_ctrl_for_user(struct pci_dev *dev, enum rockchip_pcie_pm_ctrl_flag flag);
++
+ #endif

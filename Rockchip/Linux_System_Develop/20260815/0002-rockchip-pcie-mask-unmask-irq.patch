@@ -1,0 +1,59 @@
+From d3f96b380eea087451330f173021c1b5ad5f74bf Mon Sep 17 00:00:00 2001
+From: Shawn Lin <shawn.lin@rock-chips.com>
+Date: Mon, 24 Feb 2025 08:30:36 +0800
+Subject: [PATCH] PCI: rockchip: dw: Mask and unmask misc irq
+
+Other types of irq should only be fired during linked state, except
+misc irq. Masking it to keep suspend and resume in noirq environment,
+otherwise we might occur accessing dbi in irq for hot reset case while
+resuming haven't finished, which causing the system hung.
+
+Thread #1 (Suspended : Step)
+dw_pcie_read() at pcie - designware.c:106 0xfffffc0106809d0
+dw_pcie_read_dbi() at pcie - designware.c:147 0xfffffc0106809d0
+dw_pcie_readl_dbi() at pcie - designware.h:315 0xfffffc01068686c
+rk_pcie_sys_irq_handler() at pcie - rockchip.c:1,432 0xfffffc01068686c
+__handle_irq_event_percpu() at handle.c:156 0xfffffc0100ccd50
+handle_irq_event_percpu() at handle.c:196 0xfffffc0100cd03c
+handle_irq_event() at handle.c:213 0xfffffc0100cd03c
+handle_fasteoi_irq() at chip.c:732 0xfffffc0100d2b00
+generic_handle_irq_desc() at irqdesc.h:152 0xfffffc0100cbc70
+__handle_domain_irq() at irqdesc.c:693 0xfffffc0100cbc70
+<...more frames...>
+
+Fixes: bb9632320ba7 ("PCI: dw: rockchip: Support rockchip_dw_pcie_pm_ctrl_for_user")
+Signed-off-by: Shawn Lin <shawn.lin@rock-chips.com>
+Change-Id: I2bff726b30c0c5fcaef62aa5cc80548aedbb4505
+---
+ drivers/pci/controller/dwc/pcie-dw-rockchip.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/drivers/pci/controller/dwc/pcie-dw-rockchip.c b/drivers/pci/controller/dwc/pcie-dw-rockchip.c
+index e4b886911a173..dfffbb6351653 100644
+--- a/drivers/pci/controller/dwc/pcie-dw-rockchip.c
++++ b/drivers/pci/controller/dwc/pcie-dw-rockchip.c
+@@ -2571,6 +2571,7 @@ int rockchip_dw_pcie_pm_ctrl_for_user(struct pci_dev *dev, enum rockchip_pcie_pm
+ {
+ 	struct dw_pcie *pci;
+ 	struct rk_pcie *rk_pcie;
++	u32 intr_mask;
+ 
+ 	if (!dev || !dev->bus || !dev->bus->sysdata) {
+ 		pr_err("%s input invalid\n", __func__);
+@@ -2582,8 +2583,16 @@ int rockchip_dw_pcie_pm_ctrl_for_user(struct pci_dev *dev, enum rockchip_pcie_pm
+ 
+ 	switch (flag) {
+ 	case ROCKCHIP_PCIE_PM_CTRL_RESET:
++		/*
++		 * suspend and resume should be called in noirq context, masking and
++		 * unmasking local irq to prevent hunging for accessing died controller
++		 * if serving irq, for instance, hot reset case.
++		 */
++		intr_mask = rk_pcie_readl_apb(rk_pcie, PCIE_CLIENT_INTR_MASK);
++		rk_pcie_writel_apb(rk_pcie, PCIE_CLIENT_INTR_MASK, 0xffffffff);
+ 		rockchip_dw_pcie_suspend(rk_pcie->pci->dev);
+ 		rockchip_dw_pcie_resume(rk_pcie->pci->dev);
++		rk_pcie_writel_apb(rk_pcie, PCIE_CLIENT_INTR_MASK, intr_mask | 0xffff0000);
+ 		break;
+ 	default:
+ 		dev_err(rk_pcie->pci->dev, "%s flag=%d invalid\n", __func__, flag);
