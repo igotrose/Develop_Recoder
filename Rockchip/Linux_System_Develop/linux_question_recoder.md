@@ -2069,6 +2069,8 @@ update-binfmts --display qemu-aarch64
     RK3588 作为 PCIe RC，接口已打开，主控侧 PERST#、REFCLK 及相关供电均正常，但 BM1684X 侧未正常进入 EP 模式，导致 PCIe 链路未按预期建立
 - 解决方案
     排查发现，PERST# 上电初期第一段高电平由模组侧 3.3V 上拉引起；去除上拉后，又发现 RK3588 不同 IO 上电默认电平存在差异。最终将 PERST# 切换到默认低电平的 IO，使其在 U-Boot 阶段持续保持低电平，待 kernel PCIe 初始化时再释放，BM1684X 即可正常进入 EP 模式。
+- PCIE30 速率无法提升
+    PCIE30 速率上不去的一个原因是主控侧和 PCIE30 外挂设备侧使用的参考时钟不同源。两端 REFCLK 不同源会影响链路训练稳定性，导致 PCIe 链路无法正常协商到 Gen2 / Gen3，也就是无法达到 PCIe 2.0 / 3.0 速率。
 - `uboot-dts` 设备树配置部分
     ```dts
     &gpio1 {
