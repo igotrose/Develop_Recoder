@@ -53,7 +53,7 @@ ESP32
 ## 文档
 
 - [分阶段基础学习计划](../learning-plan.md)
-- [学习记录模板](../../templates/learning_record_template.md)
+- [基础笔记模板（Core_Technologies）](https://github.com/igotrose/Core_Technologies/blob/main/templates/foundation-note.md)
 
 - [接口定义](api.md)
 - [设备通信协议](protocol.md)
@@ -76,6 +76,8 @@ ESP32
 平台侧先只追踪 `src/voice_lab/api.py`、`service.py`、`device_recording.py`，结合 `docs/API.md` 核实消息合同。
 
 ## 验证基线
+
+工作记录入口：[问题索引](issues/README.md)。归档遵循[项目规则](../README.md)，平台相关问题留在厂商目录。
 
 2026-09-14 本地阅读发现 `voice_lab_client.h` 有配对、录音、PCM、播放、ACK 和租约等接口与状态。本次没有构建或真机验收，这些不是已验证结论。前面的 LLM / TTS 链路仅作拓展示意，不能从小智上游功能推断本适配已经接通。
 
