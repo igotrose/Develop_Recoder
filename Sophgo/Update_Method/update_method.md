@@ -106,7 +106,9 @@ usb update 目录结构
     ```
 - 重启
 ### uboot 更换DTS
+uboot 每次开机都会去 emmc 上的 OEM 分区读取 `DTS_TYPE` 变量，所以在 uboot 中改变 `DTS_TYPE` 只是改变uboot 中这个变量，需要进入系统后通过 `dts_tool` 去修改
 ```
 setenv DTS_TYPE dtb
+saveenv 
 bootd
 ``` 
